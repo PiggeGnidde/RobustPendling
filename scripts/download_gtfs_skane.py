@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import urllib.parse
+import urllib.error
 import urllib.request
 
 from transit_inputs import (ENDPOINT, api_key, atomic_json, fingerprint,
@@ -56,6 +57,10 @@ def main(argv=None):
     try:
         print(download(paths(args.config)['gtfs'], args.force))
         return 0
+    except urllib.error.HTTPError as error:
+        # Only a numeric status is safe: reason, body and URL can contain secrets.
+        print(f'MISSING: GTFS request rejected (HTTP {int(error.code)}).', file=sys.stderr)
+        return 1
     except Exception:
         # HTTP errors can contain the entire credential-bearing URL or body.
         print('MISSING: GTFS ingestion failed; check credential, network, ZIP and file permissions.',

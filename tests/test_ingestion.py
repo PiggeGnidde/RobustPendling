@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import download_gtfs_skane as downloader
@@ -115,6 +116,17 @@ class IngestionTests(unittest.TestCase):
     def test_redirects_blocked(self):
         self.assertIsNone(downloader.NoRedirect().redirect_request(
             None, None, 302, '', {}, 'https://other.example'))
+
+    def test_http_error_only_prints_status(self):
+        error = urllib.error.HTTPError('https://host/?key=secret', 406,
+                                       'secret reason', {}, io.BytesIO(b'secret body'))
+        output = io.StringIO()
+        with patch.object(downloader, 'download', side_effect=error), \
+             contextlib.redirect_stderr(output):
+            self.assertEqual(downloader.main([]), 1)
+        self.assertIn('HTTP 406', output.getvalue())
+        self.assertNotIn('secret', output.getvalue())
+        self.assertNotIn('https://', output.getvalue())
 
     def test_force_replaces_feed_and_metadata(self):
         self.target.write_bytes(feed())
