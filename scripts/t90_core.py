@@ -1,6 +1,6 @@
 """Schedule statistics and frozen experiment metadata, without routing imports."""
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import hashlib
 import json
 import math
@@ -17,8 +17,8 @@ PARAMETERS['tie_break'] = 'duration, walking, lexicographic trip/boarding/alight
 
 
 def minute_grid(day, start='07:00:00', end='07:59:59', timezone='Europe/Stockholm'):
-    if timezone != 'Europe/Stockholm':
-        raise ValueError('This experiment requires Europe/Stockholm')
+    if time.fromisoformat(start).tzinfo is not None or time.fromisoformat(end).tzinfo is not None:
+        raise ValueError('Use local clock times and a separate IANA timezone')
     zone = ZoneInfo(timezone)
     first = datetime.fromisoformat(f'{day}T{start}').replace(tzinfo=zone)
     last = datetime.fromisoformat(f'{day}T{end}').replace(tzinfo=zone)
@@ -66,7 +66,7 @@ def combinations(observations):
                      for row in observations if row['duration_seconds'] is not None)
     reachable = sum(counts.values())
     return [dict(rides=[dict(route_id=r, line=l, mode=m) for r,l,m in key],
-                 transfers=len(key)-1, count=count, share_all_minutes=count/len(observations),
+                 transfers=max(len(key)-1,0), count=count, share_all_minutes=count/len(observations),
                  share_reachable_minutes=count/reachable)
             for key,count in sorted(counts.items())]
 

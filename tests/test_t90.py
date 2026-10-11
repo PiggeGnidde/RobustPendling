@@ -42,7 +42,8 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(len(minute_grid('2026-10-12',end='08:00:00')),61)
         self.assertEqual(len(minute_grid('2026-12-12')),60)
         self.assertEqual(minute_grid('2026-12-12')[0].utcoffset().total_seconds(),3600)
-        for kwargs in (dict(start='07:00:01'),dict(end='06:59:59'),dict(timezone='UTC')):
+        self.assertEqual(minute_grid('2026-10-12',timezone='UTC')[0].utcoffset().total_seconds(),0)
+        for kwargs in (dict(start='07:00:01'),dict(end='06:59:59')):
             with self.assertRaises(ValueError):minute_grid('2026-10-12',**kwargs)
         with self.assertRaises(ValueError):minute_grid('2026-10-25',start='02:00:00',end='02:59:59')
         with self.assertRaises(ValueError):minute_grid('2026-03-29',start='02:00:00',end='02:59:59')

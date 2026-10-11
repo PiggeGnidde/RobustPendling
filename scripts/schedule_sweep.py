@@ -56,8 +56,9 @@ def load_trips(feed, day, earliest, latest):
 
 
 class ScheduleSweep:
-    def __init__(self, trips, access, egress, transfers, parameters=None):
+    def __init__(self, trips, access, egress, transfers, parameters=None, direct_walk_seconds=None):
         self.p = parameters or PARAMETERS
+        self.direct_walk_seconds = direct_walk_seconds
         self.egress, self.transfers = egress, transfers
         self.first = []
         self.last = {}
@@ -90,6 +91,10 @@ class ScheduleSweep:
         cap, walking_cap = self.p['max_time_seconds'], self.p['max_walk_seconds']
         slack, egress_slack = self.p['board_slack_seconds'], self.p['egress_slack_seconds']
         best = None
+        direct = self.direct_walk_seconds
+        if direct is not None and 0 <= direct <= min(cap,walking_cap):
+            best = ((direct,direct,()),dict(duration_seconds=direct,walking_seconds=direct,
+                    waiting_seconds=0,fixed_slack_seconds=0,transfers=0,arrival_seconds=start+direct,rides=[]))
         def consider(rides, walking):
             nonlocal best
             arrival = rides[-1]['arrival_seconds'] + self.egress[rides[-1]['end_stop']] + egress_slack

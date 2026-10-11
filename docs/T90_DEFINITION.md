@@ -1,5 +1,13 @@
 # Phase 2A: T90_schedule
 
+Detta dokument bevarar Phase 2A:s metod och första verifiering. Aktuellt
+Phase 2B-anropskontrakt, koordinater, nätverksgräns, strukturella mått,
+representativa resor och GeoJSON beskrivs i
+[ANALYSIS_CONTRACT.md](ANALYSIS_CONTRACT.md). Phase 2B tillåter även rent
+gångalternativ inom samma gångbudget och andra anropstidszoner; det ändrar
+inte Lomma–Lund-resultatet. Nedanstående Phase 2A-experimenthash och
+testantal är historiska, inte den nuvarande kodens identitet.
+
 ## Vad måtten betyder
 
 **T90_schedule** är 90:e percentilen av optimala, tidtabellsenliga

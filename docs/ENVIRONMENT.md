@@ -206,3 +206,12 @@ och skillnader mot R5:s percentilsvar finns i
 [T90_DEFINITION.md](T90_DEFINITION.md). Ingen miljöändring behövdes.
 Resultat och workerlogg ligger i ignorerade outputs; originalfeeden
 och lokal paths.toml ingår inte i Git.
+
+## Phase 2B: koordinater, struktur och kartgeometri
+
+Det versionsstyrda A–B-kontraktet finns i
+[ANALYSIS_CONTRACT.md](ANALYSIS_CONTRACT.md), med reproducerbart CLI-anrop,
+JSON-schema, nätverksgräns och GeoJSON-egenskaper. Samma miljöversioner
+används; inga paketändringar behövdes. Fyra DetailedItineraries-anrop
+räcker för Lomma–Lund-fönstrets representanter; nätverket byggs en gång.
+Alla genererade JSON-/GeoJSON-resultat ligger under ignorerade outputs.

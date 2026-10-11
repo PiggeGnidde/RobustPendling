@@ -1,0 +1,183 @@
+# Phase 2B: A–B-analyskontrakt, schema 2.0
+
+CLI:n `scripts/analyze_t90.py` är anropsgränsen för ett framtida webbgränssnitt.
+Ingen webbserver ingår. Metoden är **T90_schedule/R0**, variation i statisk
+tidtabell, med definition och databegränsningar i [T90_DEFINITION.md](T90_DEFINITION.md).
+Den beskriver inte observerad punktlighet, förseningar eller inställda turer.
+
+## Anrop
+
+```powershell
+.\.venv\tools\Library\bin\micromamba.exe run -r .\.venv\mamba -n robustpendling python -B scripts/analyze_t90.py --from-lat 55.674346 --from-lon 13.074675 --to-lat 55.706384 --to-lon 13.187015 --from-name "Lomma station" --to-name "Lund C" --date 2026-10-12 --start 07:00:00 --window-minutes 60 --timezone Europe/Stockholm --output outputs/phase2b.json
+```
+
+Koordinater är WGS84: latitud −90…90 och longitud −180…180, ändliga tal.
+Samtliga fyra koordinater krävs när någon anges. Underscore-alias, exempelvis
+`--from_lat`, stöds. Namn är valfria visningsetiketter. Utan koordinater används
+GTFS-namnen Lomma station och Lund C för bakåtkompatibilitet; valfria namn
+väljer då station genom exakt namnmatch. `--window-length` är alias för
+`--window-minutes`. Standarddatum/start/fönster/zon är 2026-10-12/07:00/60/
+Europe/Stockholm. Äldre `--end` stöds, men får inte kombineras med fönsterlängd.
+
+Starten måste ligga på hel minut. N minuter ger exakt start, start+1 minut,
+…, start+(N−1) minuter; det sista fönstrets slut är sista startminut+59 s.
+IANA-tidszoner stöds. UTC 05:00 motsvarar Stockholm 07:00 detta datum.
+Tider konverteras till verifierad `agency_timezone` i GTFS för routing och
+till begärd zon för exporterade klockslag. Fönster över lokal midnatt,
+GTFS-servicedagens gräns eller sommartidsövergång stöds ännu inte.
+Tvetydiga och obefintliga lokala tider avvisas, utan tyst korrigering.
+
+## Nätverksgräns och parametrar
+
+Det kända OSM-utdragets verifierade SHA-256 är
+47942e06ea6c96c8893933f71f448f7e1deac9d906c216a16c60a414db521b9d.
+Till dessa bytes binds den faktiska extraktionsrektangeln
+**[12.95, 55.60, 13.30, 55.80]**, i ordningen väst/syd/öst/nord.
+`complete_ways` inkluderar avlägsna way-noder: objektens totala bbox
+är därför inte ett tillförlitligt mått på routingområdet.
+För annat underlag krävs en verifierad lokal konfigurationssektion
+`[network_area]` med `bbox`, `osm_sha256` och beskrivande `source`.
+Ändrad filhash ogiltigförklarar områdesbeskrivningen. Ingen täckning gissas.
+
+Utanför rektangeln returneras `OUTSIDE_NETWORK_AREA` med de berörda
+ändpunkterna i `network_area.outside`, före nätverksbyggnad/JVM-import.
+Okänd täckning ger `NETWORK_AREA_UNVERIFIED`. Felaktiga anropsvärden ger
+`INVALID_REQUEST`; ej stödda kalenderfönster ger `UNSUPPORTED_WINDOW`.
+Felstatus har samma toppnivåfält, tomma observations-/reselistor och null
+för metrics/GeoJSON. En punkt inom rektangeln garanterar inte anslutning
+till en gångväg; saknad användbar resa redovisas som UNREACHABLE.
+
+Frysta routingparametrar är fortfarande 3,6 km/h, 900 s sammanlagd gång,
+2700 s total restid, högst två fordonsdelar, 60 s boarding slack med strikt
+avgångsregel och 60 s extra före sista gången. Pickup/dropoff 0 och 3
+tillåts. **Rent gångalternativ tillåts nu**, inom samma gångbudget,
+med noll byten och utan kollektivtrafikens slack. Detta påverkar inte
+Lomma–Lund eftersom direkt gång överskrider budgeten. Ingen stokastik
+eller nya percentilregler har lagts till.
+
+## JSON och strukturella mått
+
+Alla tidsmått är **sekunder**; andelar är **0…1**. Tider är ISO 8601 med
+UTC-offset. `schema_version` är `2.0`. `status=OK` betyder att representativa
+R5-restider också matchar sweepen. Avvikelse ger `REPRESENTATIVE_MISMATCH`,
+med båda värdena bevarade. Avvikelse i någon minuts råa R5-kontroll ger
+`ROUTING_MISMATCH`. Konsumenten måste kontrollera status och
+`worker.result_status`; processfel ger ett misslyckat CLI-anrop.
+
+| Fält | Innehåll |
+| --- | --- |
+| `metrics` | T50/T90/T99, min/max/medel, täckning och strukturella mått |
+| `minute_observations` | Samtliga minuter, duration/null, gång/väntan/slack/byten, reskedja och vald family |
+| `representative_itineraries` | Representativa minuter, roller, bästa R5-resa, deduplicerade alternativ och kontrollresultat |
+| `route_families` | Normaliserade sekvenser med ID, antal valda minuter och andelar |
+| `alternatives` | Alternativens minut, roller, option, family, restid och extra sekunder |
+| `geojson_path` | Sökväg relativt projektroten, exempelvis outputs/phase2b.HASH.geojson |
+| `metadata` | Input-/kod-/JAR-hashar, versioner, datum/zon/startminuter, alla parametrar och experimenthash |
+| `verification` | Exaktminutkontroller, matrixjämförelser, nätverksbyggnader och antal detaljanalyser |
+| `derivation`, `worker`, `timing` | GTFS-filtrering, avslutsdiagnostik och uppmätta körtider |
+
+Äldre `statistics`, `observations`, `components` och `combinations` behålls.
+Gång- och väntestatistik finns i `components`; varje minut innehåller också
+gång, väntan och byte. Saknade minuter droppas aldrig: null-restid motsvarar
++∞ i percentiler, max och medel. Ett icke ändligt mått kodas UNREACHABLE.
+
+- `buffer_90 = T90−T50`, `buffer_99 = T99−T50`, `full_range = max−min`.
+  Vid oändlig operand används UNREACHABLE, även vid ∞−∞.
+- `route_coverage` är nåbara minuter / samtliga minuter.
+- `dominant_route_share` avser andelen **nåbara** minuter som väljer dominant
+  family; `dominant_route_share_all_minutes` använder alla minuter som nämnare.
+- `distinct_selected_route_families` räknar endast minuternas valda optimum.
+  Alternativ som bara hittas för representanter ökar inte detta antal.
+- `transfer_count_distribution` är antal nåbara minuter per bytesantal;
+  ej nåbara minuter rapporteras separat genom unreachable_count.
+- `departure_sensitivity` är största **positiva** ökning av optimal restid
+  mellan intilliggande startminuter, med båda klockslagen. Noll betyder att
+  ingen ökning finns. Nåbar→ej nåbar ger UNREACHABLE. Alla övergångstyper
+  som berör saknad resa räknas också i `unreachable_transitions`.
+
+En family är den ordnade sekvensen trafikslag, route_id (linjenamn som
+reserv om ID saknas), påstignings-ID och avstignings-ID. Linjenamn är även
+visningsdata. WALK-delar och deras geometrier ingår inte i identiteten.
+Olika på-/avstigningshållplatser eller ordning ger olika families; olika
+trip_id på samma linje/hållplatssekvens gör det inte. ID är SHA-256 av den
+kanoniska sekvensen. Ren gång har en tom sekvens och en gemensam family.
+
+## Representativa resor och GeoJSON
+
+Nearest-rank väljer observerade restider. För min/T50/T90/T99/max används
+första startminuten med den aktuella restiden; flera roller för samma
+observation samlas. Ej nåbara representanter behålls men routas inte.
+Nätverket byggs **en gång**. DetailedItineraries körs endast för distinkta,
+nåbara representanter, högst fem, inte för alla 60 minuter.
+
+Den versionsbundna adaptern ersätter DetailedItineraries OD-hook så att
+R5 verkligen utvärderar exakt sekund och samtliga slutalternativ bevaras.
+Stock-hooken kollapsar flera tillstånd per starttid och återanvänder
+muterbara access/egress-ben. Adaptern kopierar varje segment separat.
+R5:s slutalternativ filtreras med samma gång-/restidsbudget och
+pickup/dropoff-regler, dedupliceras per family och behåller snabbaste
+alternativet, sedan lägst gångtid och deterministisk segmentordning.
+`slower_than_best_seconds` avser sweepens verifierade optimum; noll är
+tillåtet för likvärdigt alternativ. R5:s suboptimalMinutes=5 begränsar
+alternativsökningen: den är **inte** en uttömmande lista över alla resvägar,
+och alternativa family-andelar över hela timmen uppskattas inte från fyra minuter.
+Råa R5-tillstånd och enminutsmatriser verifieras fortfarande för varje
+startminut, utan 60 fullständiga itinerary-/geometrianalyser.
+
+GeoJSON är en FeatureCollection i EPSG:4326, med LineString eller
+MultiLineString per segment. Transitgeometri kommer från R5:s
+GTFS-hopgeometrier och gånggeometri från dess gatunät. Properties omfattar
+mode, line/route_id, start/end_stop och namn, departure/arrival,
+travel_seconds/walking_seconds/wait_seconds/fixed_slack_seconds, trip_id,
+option, route_family, segment, representative_start och **percentile_role**
+(lista, till exempel `["T99","max"]`). Option 0 är bästa returnerade resa;
+option-numret är lokalt för representativ minut. Väntan tillhör följande
+transitsegment och är inte en separat linjegeometri. Slutlig 60-s-marginal
+redovisas separat. Punktnamn används vid gångresans yttre ändpunkter, utan
+påhittade GTFS-ID:n. Geometrin valideras som ändliga lon/lat-koordinater.
+
+GeoJSON skrivs atomiskt först till ett innehållsnamngivet filnamn, därefter
+JSON-resultatet atomiskt. `geojson_sha256` verifierar faktiska filbytes;
+`geojson_canonical_sha256` verifierar kanonisk JSON och styr filnamnet.
+Inputhashar kontrolleras före och efter routing. Metadatahashen undantar
+körtider, loggsökväg och processdiagnostik. Hela outputs är Git-ignorerad.
+JVM-isoleringen behålls; PyExceptionProxy vid avslut loggas fortfarande
+och redovisas som worker.jpype_shutdown_error=true även när exit_code=0.
+
+## Verifierat Lomma–Lund-resultat
+
+2026-10-12 kl. 07:00–07:59, 60 minuter:
+
+| Mått | Resultat |
+| --- | --- |
+| T50 / T90 / T99 | **36:17 / 39:17 / 42:17** |
+| Min / max / medel | 32:17 / 42:17 / 36:23 |
+| buffer_90 / buffer_99 / full_range | 3:00 / 6:00 / 10:00 |
+| Täckning / saknade minuter | **100 % / 0** |
+| Dominant vald family | Buss 139, Lomma Strandvägen → Lund C, **100 %** |
+| Valda families / byten | 1 / 0 byten i 60 minuter |
+| Största minutvisa försämring | **10:00**, 07:35 → 07:36 |
+| Representanter | T50 07:01; min 07:05; T90 07:06; T99/max 07:36 |
+| Detaljanalyser / exporterade segment | **4 / 44** |
+| Alternativa family-observationer | 8, efter deduplicering per representant |
+
+Alla fyra bästa detaljresor matchar sweepen. Alla 60 exakta råa R5-restider
+och alla 60 matrixkontroller matchar sina dokumenterade jämförelsevärden.
+Två identiska körningar gav identiska metadata, observationer, mått,
+representanter, families, alternativ, verifieringar och GeoJSON-bytes.
+Experimenthash: bcd8b337d4388563d1425cece04da262a2e4018795ff23c877c66ea575a1537b.
+GeoJSON-filens SHA-256:
+4948e7a91904fd281347fce3d75ac07163a5787ce0d5d5ef5041530354749643.
+Alla 40 tester passerade. En separat körning med godtyckliga närliggande
+koordinater och UTC gav 308 s ren gång och en detaljanalys för två minuter.
+Punkt utanför området avvisades utan JVM-start.
+Gång är 606 s och inga byten väljs. Lika snabba alternativ med annan
+avstigningshållplats är korrekt olika families. Geometri och
+alternativ saknas avsiktligt för övriga 56 minuter.
+
+Filtrering av 1501 är oförändrad: R5 stöder inte trafiktypen; separat
+GTFS-kopia tar bort 340 routes, 1440 trips, 6134 stop_times och 3 transfers.
+Originalets SHA-256 förblir
+6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182.
+Detta regionala test är inte full Skånetäckning, ±15-minutersstudie eller
+arbetsplatsanalys. Inga miljöpaket eller nya data installerades/hämtades.

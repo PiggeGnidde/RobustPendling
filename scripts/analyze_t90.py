@@ -9,11 +9,19 @@ import subprocess
 import sys
 import time
 import warnings
+import hashlib
+import tomllib
+import zipfile
+import csv
+import io
+from zoneinfo import ZoneInfo
 
 from transit_inputs import ROOT, paths, fingerprint, atomic_json
 from smoke_helpers import gtfs_tables, select_station, routing_feed
 from t90_core import PARAMETERS, minute_grid, statistics, metadata, combinations, component_statistics
 from schedule_sweep import ScheduleSweep, load_trips
+from analysis_contract import (SCHEMA_VERSION,point,request_grid,area_check,family,
+                               structural_metrics,representatives,validate_geojson)
 
 
 def parser():
@@ -21,16 +29,58 @@ def parser():
     p.add_argument('--config', type=Path, default=ROOT/'config/paths.toml')
     p.add_argument('--date', default='2026-10-12')
     p.add_argument('--start', default='07:00:00')
-    p.add_argument('--end', default='07:59:59')
+    p.add_argument('--end', help='Legacy inclusive end; cannot be combined with window length')
+    p.add_argument('--window-minutes','--window-length','--window_minutes',type=int)
+    for endpoint in ('from','to'):
+        for axis in ('lat','lon'):
+            p.add_argument(f'--{endpoint}-{axis}',f'--{endpoint}_{axis}',type=float)
+        p.add_argument(f'--{endpoint}-name',f'--{endpoint}_name')
     p.add_argument('--timezone', default='Europe/Stockholm')
     p.add_argument('--output', type=Path, default=ROOT/'outputs/t90_schedule_lomma_lund.json')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
+    p.add_argument('--artifact-prefix',help=argparse.SUPPRESS)
     return p
+
+
+def empty_response(status,message,meta=None,area=None):
+    return dict(schema_version=SCHEMA_VERSION,status=status,message=message,metadata=meta,
+                network_area=area,metrics=None,minute_observations=[],representative_itineraries=[],
+                route_families=[],alternatives=[],geojson_path=None)
 
 
 def worker(args, grid):
     inputs = paths(args.config)
     initial_hashes = dict(osm=fingerprint(inputs['osm']),gtfs=fingerprint(inputs['gtfs']))
+    requested_grid=grid
+    stops,_=gtfs_tables(inputs['gtfs'])
+    coordinates=[args.from_lat,args.from_lon,args.to_lat,args.to_lon]
+    if any(c is not None for c in coordinates) and not all(c is not None for c in coordinates):
+        atomic_json(args.output,empty_response('INVALID_REQUEST','Supply all four coordinates or none'));return
+    try:
+        if all(c is not None for c in coordinates):
+            origin=dict(id='from',source='request',**point(args.from_lat,args.from_lon,args.from_name or 'Origin'))
+            destination=dict(id='to',source='request',**point(args.to_lat,args.to_lon,args.to_name or 'Destination'))
+        else:
+            origin=dict(**select_station(stops,args.from_name or 'Lomma station'),source='GTFS')
+            destination=dict(**select_station(stops,args.to_name or 'Lund C'),source='GTFS')
+        config=tomllib.loads(args.config.read_text(encoding='utf-8'))
+        area=area_check(origin,destination,initial_hashes['osm']['sha256'],config.get('network_area'))
+    except ValueError as error:
+        atomic_json(args.output,empty_response('INVALID_REQUEST',str(error)));return
+    early_meta=metadata(initial_hashes,dict(python=sys.version.split()[0],r5py='NOT_STARTED',r5='NOT_STARTED'),
+                        requested_grid,dict(PARAMETERS,origin=origin,destination=destination,
+                                            network_area=area,window_minutes=len(grid),schema_version=SCHEMA_VERSION))
+    if area['status']!='OK':
+        atomic_json(args.output,empty_response(area['status'],'Points must be within verified extraction coverage',early_meta,area));return
+    # Convert request timestamps to the verified GTFS agency service clock.
+    with zipfile.ZipFile(inputs['gtfs']) as archive:
+        agency_zones={r['agency_timezone'] for r in csv.DictReader(io.StringIO(archive.read('agency.txt').decode('utf-8-sig')))}
+    if len(agency_zones)!=1:
+        atomic_json(args.output,empty_response('UNSUPPORTED_FEED','A single agency timezone is required',early_meta,area));return
+    feed_timezone=agency_zones.pop()
+    grid=[t.astimezone(ZoneInfo(feed_timezone)) for t in grid]
+    if any(t.date()!=grid[0].date() or t.utcoffset()!=t.replace(fold=1).utcoffset() for t in grid) or (grid[-1]+timedelta(minutes=45)).utcoffset()!=grid[0].utcoffset():
+        atomic_json(args.output,empty_response('UNSUPPORTED_WINDOW','Feed-day crossing or DST transition is not yet supported',early_meta,area));return
     os.environ['JAVA_HOME'] = str(Path(sys.prefix)/'Library/lib/jvm')
     os.environ['LOCALAPPDATA'] = str(ROOT/'cache/runtime')
     os.environ['APPDATA'] = str(ROOT/'cache/config')
@@ -50,8 +100,6 @@ def worker(args, grid):
     derived = ROOT/'data/gtfs/skane-20261011-r0.zip'
     derived.parent.mkdir(parents=True,exist_ok=True)
     derivation = routing_feed(inputs['gtfs'],derived)
-    stops,_ = gtfs_tables(inputs['gtfs'])
-    origin, destination = select_station(stops,'Lomma station'), select_station(stops,'Lund C')
     started = time.perf_counter()
     network = r5py.TransportNetwork(inputs['osm'],[derived])
     build_seconds = time.perf_counter()-started
@@ -87,14 +135,16 @@ def worker(args, grid):
     midnight = grid[0].replace(hour=0,minute=0,second=0,microsecond=0)
     start_seconds = [t.hour*3600+t.minute*60 for t in grid]
     trips = load_trips(derived,grid[0],start_seconds[0],start_seconds[-1]+2700)
-    sweep = ScheduleSweep(trips,access,egress,transfers)
+    direct_walk=min((round(t.travel_time.total_seconds()) for t in planner.direct_paths),default=None)
+    sweep = ScheduleSweep(trips,access,egress,transfers,direct_walk_seconds=direct_walk)
     started = time.perf_counter()
     observations = []
-    for instant, seconds in zip(grid,start_seconds):
+    for instant, seconds in zip(requested_grid,start_seconds):
         row = dict(start=instant.isoformat(),start_seconds=seconds,**sweep.at(seconds))
         if row['duration_seconds'] is not None:
-            row['arrival'] = (midnight+timedelta(seconds=row['arrival_seconds'])).isoformat()
+            row['arrival'] = (midnight+timedelta(seconds=row['arrival_seconds'])).astimezone(instant.tzinfo).isoformat()
             row['status'] = 'REACHABLE'
+            row['route_family']=family(row['rides'])['id']
         observations.append(row)
     sweep_seconds = time.perf_counter()-started
 
@@ -152,11 +202,15 @@ def worker(args, grid):
         rng_field.set(engine,rng_class(seed))
         engine.route()
         keys = sorted(int(k) for k in engine.finalStatesByDepartureTime.keys())
-        if keys != [seconds]: raise RuntimeError('Router did not evaluate requested exact minute')
-        choices = [state_result(s,seconds) for s in engine.finalStatesByDepartureTime.get(seconds)]
+        if keys != [seconds] and keys != []:
+            raise RuntimeError('Router evaluated an unexpected start minute')
+        states=engine.finalStatesByDepartureTime.get(seconds)
+        choices = [state_result(s,seconds) for s in states] if states is not None else []
         finite = [c for c in choices if c is not None]
         best = min(finite,key=lambda c:c['duration_seconds']) if finite else None
         value = best['duration_seconds'] if best else None
+        if direct_walk is not None and direct_walk<=900:
+            value=direct_walk if value is None else min(value,direct_walk)
         comparisons.append(dict(start=row['start'],evaluated_seconds=keys,raw_r5_seconds=value,
                                 explicit_seconds=row['duration_seconds'],equal=value==row['duration_seconds']))
     native = copy.copy(request)._regional_task
@@ -192,28 +246,71 @@ def worker(args, grid):
                  max_public_transport_rides=2)
             matrix_warnings.update(str(w.message) for w in captured)
         result_minutes = json.loads(pd.DataFrame(minute_matrix).to_json(orient='records'))[0]['travel_time']
-        expected = ((row['duration_seconds']-60)//60) if row['duration_seconds'] is not None else None
+        expected = ((row['duration_seconds']-row['fixed_slack_seconds'])//60) if row['duration_seconds'] is not None else None
         minute_matrices.append(dict(start=instant.isoformat(),r5_matrix_minutes=result_minutes,
                                      explicit_minus_egress_floor_minutes=expected,equal=result_minutes==expected))
     frozen = dict(PARAMETERS,origin=origin,destination=destination,
                   r5_suboptimal_minutes=int(task.suboptimalMinutes),
-                  window_start=args.start,window_end_inclusive=args.end,
+                  window_start=args.start,window_end_inclusive=(requested_grid[-1]+timedelta(seconds=59)).isoformat(),
+                  window_minutes=len(grid),network_area=area,schema_version=SCHEMA_VERSION,
+                  feed_timezone=feed_timezone,feed_service_date=grid[0].date().isoformat(),
+                  allow_pure_walk=True,geometry_crs='EPSG:4326',
                   sweep='exhaustive_one_or_two_rides_on_R5_walking_links',
                   exact_r5_adapter_seed=seed, exact_r5_interval_seconds=2)
     frozen['native_diagnostic_draws'] = int(native.monteCarloDraws)
     hashes = dict(osm=fingerprint(inputs['osm']),gtfs_original=fingerprint(inputs['gtfs']),
                   gtfs_derived=fingerprint(derived),r5_jar=fingerprint(jar),
                   code={name:fingerprint(ROOT/'scripts'/name) for name in
-                        ('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py')})
+                        ('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py')})
     if initial_hashes != dict(osm=hashes['osm'],gtfs=hashes['gtfs_original']):
         raise RuntimeError('Input changed during the experiment; no result published')
     versions = dict(python=sys.version.split()[0],r5py=r5py.__version__,r5='7.5.1-r5py',
                     java=str(jpype.JClass('java.lang.System').getProperty('java.version')))
-    report = dict(metadata=metadata(hashes,versions,grid,frozen),derivation=derivation,
+    from detailed_routes import collect
+    representative_itineraries=[];features=[];alternatives=[];registry={};calls=0
+    for row in observations:
+        if row['duration_seconds'] is not None:
+            f=family(row['rides']);registry.setdefault(f['id'],dict(**f,selected_count=0))['selected_count']+=1
+    for role in representatives(observations):
+        index=role['index'];row=observations[index]
+        if row['duration_seconds'] is None:
+            representative_itineraries.append(dict(**role,best_duration_seconds=None,best_r5_option=None,options=[],matches_sweep=None));continue
+        calls+=1
+        item,geo=collect(network,origin,destination,role,row,grid[index],{t['id']:t for t in trips},
+                         {s['stop_id']:s['stop_name'] for s in stops})
+        representative_itineraries.append(item);features.extend(geo)
+        for option in item['options']:
+            f=option['route_family'];registry.setdefault(f['id'],dict(**f,selected_count=0))
+            if option['option']>0:
+                alternatives.append(dict(representative_start=row['start'],percentile_roles=role['percentile_roles'],
+                    option=option['option'],route_family=f['id'],duration_seconds=option['duration_seconds'],
+                    slower_than_best_seconds=option['slower_than_best_seconds']))
+    for f in registry.values():
+        f['share_all_minutes']=f['selected_count']/len(grid)
+        reachable=sum(r['duration_seconds'] is not None for r in observations)
+        f['share_reachable_minutes']=f['selected_count']/reachable if reachable else 0
+    collection=validate_geojson(dict(type='FeatureCollection',features=features))
+    canonical=json.dumps(collection,sort_keys=True,separators=(',',':'),allow_nan=False)
+    geometry_hash=hashlib.sha256(canonical.encode()).hexdigest()
+    geo_path=args.output.parent/f'{args.artifact_prefix or args.output.stem}.{geometry_hash[:16]}.geojson'
+    atomic_json(geo_path,collection)
+    if initial_hashes != dict(osm=fingerprint(inputs['osm']),gtfs=fingerprint(inputs['gtfs'])):
+        raise RuntimeError('Input changed during itinerary collection; no result published')
+    matches=all(r['matches_sweep'] is not False for r in representative_itineraries)
+    exact_matches=all(c['equal'] for c in comparisons)
+    report = dict(schema_version=SCHEMA_VERSION,status=('REPRESENTATIVE_MISMATCH' if not matches else
+                  'ROUTING_MISMATCH' if not exact_matches else 'OK'),
+                  metadata=metadata(hashes,versions,requested_grid,frozen),derivation=derivation,network_area=area,
+                  metrics=structural_metrics(observations),minute_observations=observations,
+                  representative_itineraries=representative_itineraries,route_families=sorted(registry.values(),key=lambda f:f['id']),
+                  alternatives=alternatives,geojson_path=geo_path.relative_to(ROOT).as_posix(),
+                  geojson_sha256=fingerprint(geo_path)['sha256'],geojson_canonical_sha256=geometry_hash,
                   statistics=statistics([r['duration_seconds'] for r in observations]),
                   observations=observations,combinations=combinations(observations),
                   components=component_statistics(observations),
                   verification=dict(exact_minute_comparisons=comparisons,
+                    network_build_count=1,detailed_itineraries_calls=calls,
+                    representative_match_count=sum(r['matches_sweep'] is True for r in representative_itineraries),
                     equal_count=sum(c['equal'] for c in comparisons),
                     native_generated_seconds=selected,native_evaluated_seconds=native_keys,
                     native_exact_grid=native_keys==start_seconds,
@@ -231,20 +328,33 @@ def worker(args, grid):
 
 def main():
     args = parser().parse_args()
-    grid = minute_grid(args.date,args.start,args.end,args.timezone)
     args.output = args.output.resolve()
     # This CLI only emits generated artifacts in the ignored output directory.
     if not args.output.is_relative_to((ROOT/'outputs').resolve()):
         raise ValueError('Generated output must be under the ignored worktree outputs directory')
+    if args.artifact_prefix and (Path(args.artifact_prefix).name!=args.artifact_prefix or args.artifact_prefix in ('.','..')):
+        raise ValueError('Artifact prefix must be a plain filename stem')
     args.output.parent.mkdir(parents=True,exist_ok=True)
+    try:
+        if args.end is not None:
+            if args.window_minutes is not None:raise ValueError('Choose window length or legacy end, not both')
+            grid=minute_grid(args.date,args.start,args.end,args.timezone)
+        else:
+            grid=request_grid(args.date,args.start,60 if args.window_minutes is None else args.window_minutes,args.timezone)
+    except (ValueError,KeyError) as error:
+        atomic_json(args.output,empty_response('INVALID_REQUEST',str(error)));return
     if args.worker:
         worker(args,grid)
     else:
         log = args.output.with_suffix('.worker.log')
         work_result = args.output.with_suffix('.worker.json')
         command = [sys.executable,'-B',str(Path(__file__).resolve()),'--worker','--config',str(args.config.resolve()),
-                   '--date',args.date,'--start',args.start,'--end',args.end,'--timezone',args.timezone,
-                   '--output',str(work_result)]
+                   '--date',args.date,'--start',args.start,'--window-minutes',str(len(grid)),'--timezone',args.timezone,
+                   '--output',str(work_result),'--artifact-prefix',args.output.stem]
+        for endpoint in ('from','to'):
+            for field in ('lat','lon','name'):
+                value=getattr(args,f'{endpoint}_{field}')
+                if value is not None:command.extend([f'--{endpoint}-{field}',str(value)])
         # Remove only our previous temporary result, so a failed worker cannot
         # be mistaken for a new success. Preserve the previous final result.
         work_result.unlink(missing_ok=True)
@@ -257,12 +367,9 @@ def main():
                                jpype_shutdown_error='PyExceptionProxy' in log.read_text(encoding='utf-8'),
                                result_status='VALID' if job.returncode==0 else 'DIAGNOSTIC')
         atomic_json(args.output,report)
-        print(json.dumps(dict(statistics=report['statistics'],combinations=report['combinations'],
-                              components=report['components'],
-                              verification_equal_count=report['verification']['equal_count'],
-                              matrix_minute_equal_count=report['verification']['minute_matrix_equal_count'],
-                              native_exact_grid=report['verification']['native_exact_grid'],
-                              r5_matrix=report['verification']['r5_travel_time_matrix'],
+        print(json.dumps(dict(status=report['status'],metrics=report['metrics'],
+                              verification=report.get('verification',{}).get('representative_match_count'),
+                              geojson_path=report['geojson_path'],
                               worker=report['worker']),indent=2))
         if job.returncode: raise RuntimeError('Worker exited unsuccessfully; recorded result is diagnostic only')
 
