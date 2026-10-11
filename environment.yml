@@ -12,3 +12,4 @@ dependencies:
   - shapely=2.1
   - pyproj=3.7
   - pyogrio=0.11
+  - rasterio=1.4
