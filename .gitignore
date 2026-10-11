@@ -1,6 +1,9 @@
 # Lokala hemligheter
 .env
 .env.*
+!.env.example
+config/paths.toml
+cache/
 
 # Virtuella miljöer
 .venv/

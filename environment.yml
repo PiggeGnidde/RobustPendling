@@ -1,0 +1,14 @@
+# Windows candidate specification; solve and export an explicit win-64 lock before routing.
+name: robustpendling
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - r5py=1.1.7
+  - openjdk=21
+  - geopandas=1.1
+  - pandas=2.3
+  - shapely=2.1
+  - pyproj=3.7
+  - pyogrio=0.11

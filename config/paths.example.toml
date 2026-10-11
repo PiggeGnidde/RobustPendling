@@ -1,0 +1,7 @@
+# Relative paths resolve against the project root. External inputs are read-only.
+[paths]
+osm = 'C:\Users\bengt\Downloads\export.osm'
+lomma_archive = 'C:\Users\bengt\Downloads\Lomma_V5_1_resultat_och_validering.zip'
+gtfs = 'data/gtfs/skane.zip'
+cache = 'cache'
+output = 'outputs'
