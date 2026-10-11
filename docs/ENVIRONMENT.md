@@ -74,8 +74,13 @@ Proverna indikerar trafikmängd men bevisar inte användbara A–B-förbindelser
 ```powershell
 python -B scripts\download_gtfs_skane.py --config config\paths.toml
 python -B scripts\inspect_inputs.py --config config\paths.toml
-# Endast vid avsiktlig uppdatering:
-python -B scripts\download_gtfs_skane.py --config config\paths.toml --force
+# Endast vid avsiktlig uppdatering av ofryst lokal källa; aldrig den frysta filen:
+python -B scripts\download_gtfs_skane.py --config config\paths.example.toml --force
+# Frysta indata och det avgränsade Phase 1-testet (befintlig miljö):
+.\scripts\prepare_lomma_lund.ps1
+# Konfigurera config/paths.toml enligt LOMMA_LUND_SMOKE.md före nästa kommando.
+New-Item -ItemType Directory -Force outputs | Out-Null
+& $mambaExe run -r .\.venv\mamba -n robustpendling python -B scripts\smoke_lomma_lund.py --rebuild *> outputs\lomma_lund_smoke_rebuild.log
 ```
 
 En befintlig giltig ZIP återanvänds utan nätverksanrop eller nyckelläsning.
@@ -96,7 +101,7 @@ inte gångnätets konnektivitet. PBF-täckning kräver en senare läsare.
 Lomma-gräns och befolkningspunkter läses direkt i det inventerade arkivet,
 utan extrahering; punkterna är inte verifierad befolkning 20–64 år.
 
-Före första A→B-testet återstår ett kompatibelt OSM-PBF med rätt
+Efter den ursprungliga Phase 0-kontrollen återstod ett kompatibelt OSM-PBF med rätt
 geografisk täckning, detaljerad trafik-/kalenderkontroll och routingkod.
 Frys A/B-koordinater, Europe/Stockholm, datum, starttidsurval, gånghastighet,
 bytesregler och percentilmetod. Börja med en handkontrollerad resa och
@@ -172,9 +177,23 @@ Skillnaderna visar olika objektvyer, men utan versionsmetadata går det
 inte att välja en auktoritativ variant. Godkänn inte underlaget enbart
 för att referenserna finns; check-refs har inte kunnat slutföras.
 
-STOPP: ingen PBF-konvertering, TransportNetwork eller kollektivtrafikresa
+Vid denna äldre XML-kontroll: ingen PBF-konvertering, TransportNetwork eller kollektivtrafikresa
 kördes. Inga nya OSM-data hämtades. Byggtid, nätverksminne, R5-varningar,
 okopplade hållplatser och resans delkomponenter är därför inte uppmätta.
 Det efterfrågade routingsmoke-skriptet skjuts upp tills ett entydigt,
 ofiltrerat och referenskomplett underlag finns. Förkontrollen och dess
 tester är den reproducerbara stoppgrinden för detta steg.
+
+## Phase 1: verifierad ersättningsdata och funktionstest
+
+Det tidigare XML-underlaget behålls och är fortsatt **ogiltigt för routing**.
+En daterad Geofabrik-PBF har nu hämtats med kontrollerad MD5. Gemensamma
+rådata ligger i C:\RobustPendling\data, separat från worktreen. Detaljer,
+hashar, lokal paths.toml-konfiguration, alla typer av byggvarningar och
+reskedjan finns i [LOMMA_LUND_SMOKE.md](LOMMA_LUND_SMOKE.md).
+Nätverket byggdes från ett complete_ways-utdrag och en separat härledd
+GTFS-kopia som tar bort förbeställningstrafik av route_type 1501, vilken
+R5 inte stöder. Originalfeeden är oförändrad. Det är en begränsning för
+kommande MVP-beräkningar som måste redovisas, inte ett fullständigt Skånenät.
+Det verifierade testet innehåller en tidtabellsenlig bussresa och gång.
+Samtliga 22 tester passerade. T90 och övriga robusthetsmått återstår.
