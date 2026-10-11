@@ -1,4 +1,5 @@
 import contextlib
+import gzip
 import hashlib
 import io
 import json
@@ -15,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import download_gtfs_skane as downloader
 import transit_inputs as inputs
 import inspect_inputs
+from gtfs_summary import summarize
+from datetime import date
 
 
 def feed(missing=None):
@@ -31,10 +34,13 @@ class IngestionTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.target = Path(self.tmp.name) / 'skane.zip'
 
-    def client(self, payload):
+    def client(self, payload, encoding=''):
         class Client:
             def open(self, request, timeout):
-                return io.BytesIO(payload)
+                assert request.get_header('Accept-encoding') == 'gzip'
+                response = io.BytesIO(payload)
+                response.headers = {'Content-Encoding': encoding}
+                return response
         return Client()
 
     def test_key_sources(self):
@@ -44,6 +50,26 @@ class IngestionTests(unittest.TestCase):
             self.assertEqual(inputs.api_key(env), 'file-secret')
         with patch.dict(os.environ, {'TRAFIKLAB_API_KEY': 'environment-secret'}):
             self.assertEqual(inputs.api_key(env), 'environment-secret')
+
+    def test_gzip_response_saved_as_zip(self):
+        payload = feed()
+        with patch.dict(os.environ, {'TRAFIKLAB_API_KEY': 'secret'}):
+            downloader.download(self.target, opener=self.client(gzip.compress(payload), 'gzip'))
+        self.assertEqual(self.target.read_bytes(), payload)
+        self.assertTrue(inputs.metadata_valid(self.target))
+
+    def test_calendar_exceptions_and_evening_summary(self):
+        with zipfile.ZipFile(self.target, 'w') as z:
+            z.writestr('stops.txt', 'stop_id\ns1\n')
+            z.writestr('routes.txt', 'route_id,route_type\nr1,700\n')
+            z.writestr('trips.txt', 'trip_id,route_id,service_id\nt1,r1,s1\n')
+            z.writestr('stop_times.txt', 'trip_id,departure_time\nt1,21:30:00\nt1,22:00:00\n')
+            z.writestr('calendar_dates.txt', 'service_id,date,exception_type\ns1,20261012,1\ns1,20261017,2\n')
+        result = summarize(self.target, date(2026, 10, 11))
+        self.assertEqual(result['stop_times'], 2)
+        self.assertEqual(result['samples'][0]['active_trips'], 1)
+        self.assertEqual(result['samples'][0]['evening_trip_starts_21_23'], 1)
+        self.assertEqual(result['samples'][1]['active_trips'], 0)
 
     def test_missing_key_safe(self):
         with patch.dict(os.environ, {}, clear=True):

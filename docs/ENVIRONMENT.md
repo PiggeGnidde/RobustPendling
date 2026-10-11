@@ -45,6 +45,20 @@ med operator skane. Nyckeln finns endast i HTTPS-anropet, aldrig i
 metadata eller utskrifter. Omdirigeringar blockeras och råa nätverksfel
 skrivs aldrig ut. Ingen verklig feed hämtades under Phase 0.
 
+Hämtaren skickar Accept-Encoding: gzip enligt Trafiklabs OpenAPI.
+Content-Encoding: gzip avkodas strömmande innan ZIP-validering och lagring;
+okomprimerade svar stöds också. Storlek och SHA-256 avser den lagrade ZIP-filen.
+Vid HTTP-fel visas endast status och strikt tillåtna, säkra header-värden;
+URL, reason och response body utelämnas eftersom de kan innehålla nyckeln.
+GZIP-kravet finns i [GTFS Regional Static OpenAPI](https://github.com/trafiklab/openApi-docs/blob/master/gtfsRegionalStatic.yaml).
+
+inspect_inputs rapporterar också feed_version, kalenderns datumomslutning,
+antal stops/routes/trips/stop_times och route_type-koder. Trafikprover väljs
+för måndag, lördag och söndag inom kalenderomslutningen, med calendar_dates
+som tillägg/undantag. Referensdatum redovisas. Kvällsmåttet räknar turstarter
+21:00–23:00; stop_times räknar tabellrader, inte unika fordonsavgångar.
+Proverna indikerar trafikmängd men bevisar inte användbara A–B-förbindelser.
+
 ```powershell
 python -B scripts\download_gtfs_skane.py --config config\paths.toml
 python -B scripts\inspect_inputs.py --config config\paths.toml

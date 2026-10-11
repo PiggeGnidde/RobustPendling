@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from transit_inputs import metadata_valid, paths, validate_gtfs
+from gtfs_summary import summarize
 
 
 def inspect(kind, path):
@@ -42,7 +43,7 @@ def inspect(kind, path):
         names = validate_gtfs(path)
         status = 'VERIFIED' if metadata_valid(path) else 'ASSUMED'
         calendar = 'calendar.txt' in names or 'calendar_dates.txt' in names
-        return f'{status}: ZIP tables verified; {stat.st_size} bytes; calendar present={calendar}; service dates not yet validated'
+        return f'{status}: ZIP tables verified; calendar present={calendar}; ' + json.dumps(summarize(path), ensure_ascii=True)
     if kind == 'lomma_archive':
         with zipfile.ZipFile(path) as archive:
             boundary = json.loads(archive.read('V4/lomma_boundary.geojson'))

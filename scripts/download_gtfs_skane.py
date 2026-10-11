@@ -1,5 +1,6 @@
 """Fetch static Skåne GTFS without printing credentials or network exceptions."""
 import argparse
+import gzip
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -29,11 +30,16 @@ def download(target, force=False, env_file=None, opener=None):
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=target.parent, suffix='.tmp')
     try:
-        request = urllib.request.Request(ENDPOINT + '?' + urllib.parse.urlencode({'key': key}))
+        request = urllib.request.Request(ENDPOINT + '?' + urllib.parse.urlencode({'key': key}),
+                                         headers={'Accept-Encoding': 'gzip'}, method='GET')
         client = opener or urllib.request.build_opener(NoRedirect())
         with os.fdopen(fd, 'wb') as stream:
             with client.open(request, timeout=60) as response:
-                for chunk in iter(lambda: response.read(1024 * 1024), b''):
+                encoding = response.headers.get('Content-Encoding', '').strip().lower()
+                if encoding not in ('', 'identity', 'gzip'):
+                    raise ValueError('Unsupported content encoding')
+                source = gzip.GzipFile(fileobj=response) if encoding == 'gzip' else response
+                for chunk in iter(lambda: source.read(1024 * 1024), b''):
                     stream.write(chunk)
             stream.flush()
             os.fsync(stream.fileno())
@@ -60,6 +66,16 @@ def main(argv=None):
     except urllib.error.HTTPError as error:
         # Only a numeric status is safe: reason, body and URL can contain secrets.
         print(f'MISSING: GTFS request rejected (HTTP {int(error.code)}).', file=sys.stderr)
+        # Strict value allowlists prevent arbitrary echoed secrets in headers.
+        allowed = {'Content-Encoding': {'gzip', 'identity'},
+                   'Content-Type': {'application/json', 'application/zip', 'text/plain', 'text/html'}}
+        for name, values in allowed.items():
+            value = error.headers.get(name, '').lower().strip()
+            if value in values:
+                print(f'{name}: {value}', file=sys.stderr)
+        value = error.headers.get('Content-Length', '')
+        if value.isascii() and value.isdigit() and len(value) <= 12:
+            print(f'Content-Length: {value}', file=sys.stderr)
         return 1
     except Exception:
         # HTTP errors can contain the entire credential-bearing URL or body.
