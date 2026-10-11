@@ -1,0 +1,25 @@
+# Lokala hemligheter
+.env
+.env.*
+
+# Virtuella miljöer
+.venv/
+venv/
+env/
+.virtualenv/
+
+# Python-cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Rådata och genererade filer
+data/
+outputs/
+logs/
+*.log
+
+# Lokal skärmbild
+CodexScreen.png
