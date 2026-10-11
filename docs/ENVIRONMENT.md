@@ -144,3 +144,37 @@ Hela feedens hållplatsomslutning är [55.339604, 11.971953]–[57.710295, 16.36
 Om samtliga hållplatser ska omfattas behövs sydsvensk/dansk PBF-täckning
 åtminstone över denna bbox med marginal, exempelvis
 [55.29, 11.92]–[57.76, 16.42], samt kontroll av hela reskorridorer.
+
+## Phase 1: osmium-kontroll, 2026-10-11
+
+osmium-tool=1.19 installerades enbart i robustpendling och löstes till
+1.19.1; libboost 1.90.0 tillkom. Inga tidigare paket behövde byta version.
+Paketlåset uppdaterades från den installerade miljön.
+
+Reproducera kontrollerna med miljöns Library/bin/osmium.exe:
+`fileinfo -e C:\Users\bengt\Downloads\export.osm` och
+`check-refs C:\Users\bengt\Downloads\export.osm`.
+fileinfo visar XML, 415 402 noder, 77 158 ways, 104 relationer och samma
+bbox som ovan. Objekten är osorterade och saknar versions-/tidsmetadata.
+check-refs avbryter med "Found a node after a way".
+`osmium sort` till data/osm/lomma_lund.sorted.osm bevarar originalet, men
+både check-refs och check-refs -r på kopian avbryter med
+"Node ID twice in input". Dessa fel är inte ett godkänt referensresultat.
+
+Den reproducerbara skrivskyddade förkontrollen
+`python -B scripts/check_osm_structure.py` granskar originalets ID:n,
+objektinnehåll och referenser. Den räknar 412 490 unika node-ID:n,
+77 152 unika way-ID:n och 104 unika relation-ID:n. Det finns 2 912 extra
+nodförekomster och 6 extra way-förekomster; samtliga 2 918 upprepningar
+skiljer sig i innehåll, även med taggordning ignorerad. Inga saknade
+way/node-referenser eller relationsmedlemmar hittades av denna kontroll.
+Skillnaderna visar olika objektvyer, men utan versionsmetadata går det
+inte att välja en auktoritativ variant. Godkänn inte underlaget enbart
+för att referenserna finns; check-refs har inte kunnat slutföras.
+
+STOPP: ingen PBF-konvertering, TransportNetwork eller kollektivtrafikresa
+kördes. Inga nya OSM-data hämtades. Byggtid, nätverksminne, R5-varningar,
+okopplade hållplatser och resans delkomponenter är därför inte uppmätta.
+Det efterfrågade routingsmoke-skriptet skjuts upp tills ett entydigt,
+ofiltrerat och referenskomplett underlag finns. Förkontrollen och dess
+tester är den reproducerbara stoppgrinden för detta steg.

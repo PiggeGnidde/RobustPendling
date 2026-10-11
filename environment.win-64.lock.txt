@@ -55,6 +55,7 @@ https://conda.anaconda.org/conda-forge/win-64/lcms2-2.19.1-hf2c6c5f_3.conda#a817
 https://conda.anaconda.org/conda-forge/win-64/lerc-4.2.0-hd936e49_0.conda#add59e2b60ac9d4299d17c938185c75a
 https://conda.anaconda.org/conda-forge/win-64/libarchive-3.8.9-gpl_h8fdc8af_101.conda#74c32a74e1b188a4e14fc359c721e4b9
 https://conda.anaconda.org/conda-forge/win-64/libblas-3.11.0-11_h8455456_mkl.conda#a63c8b08343d276a552c395f495987fa
+https://conda.anaconda.org/conda-forge/win-64/libboost-1.90.0-h9dfe17d_3.conda#15620ea8e1fa6d5eb275ee8665f88b32
 https://conda.anaconda.org/conda-forge/win-64/libbrotlicommon-1.2.0-hf02afa3_4.conda#35d7e4a581c8364e8c675f6b95d183d0
 https://conda.anaconda.org/conda-forge/win-64/libbrotlidec-1.2.0-h84f9c24_4.conda#1b4637ca71b21c0d31ab28c3c0b34c8e
 https://conda.anaconda.org/conda-forge/win-64/libbrotlienc-1.2.0-he2a975b_4.conda#562b5e39b7797423e7fd04bae1c6ad70
@@ -108,6 +109,7 @@ https://conda.anaconda.org/conda-forge/win-64/numpy-2.5.4-py312ha3f287d_0.conda#
 https://conda.anaconda.org/conda-forge/win-64/openjdk-21.0.10-h56f2b75_22.conda#1154a02ef074f63b301c5ce44ebd9626
 https://conda.anaconda.org/conda-forge/win-64/openjpeg-2.5.4-h90fa87c_2.conda#d9b2cb1079cf59651722c09aa3a9f840
 https://conda.anaconda.org/conda-forge/win-64/openssl-3.6.5-hf411b9b_0.conda#f002ec2237836867bfd3d1299a6005da
+https://conda.anaconda.org/conda-forge/win-64/osmium-tool-1.19.1-h60971b7_0.conda#c5ea6678eb9b3a4c7de28dd592e68662
 https://conda.anaconda.org/conda-forge/noarch/packaging-26.3-pyhc364b38_0.conda#936687ed80f295a1f5dbcf8bd34c252c
 https://conda.anaconda.org/conda-forge/win-64/pandas-2.3.3-py312hc128f0a_2.conda#57d80e87a8b3161bcf26472deceaa556
 https://conda.anaconda.org/conda-forge/win-64/pcre2-10.47-h8466c1e_1.conda#009af999dbe2d1db36a37187a4ca4eb4

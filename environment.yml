@@ -13,3 +13,4 @@ dependencies:
   - pyproj=3.7
   - pyogrio=0.11
   - rasterio=1.4
+  - osmium-tool=1.19
