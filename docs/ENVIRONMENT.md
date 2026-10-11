@@ -196,4 +196,13 @@ GTFS-kopia som tar bort förbeställningstrafik av route_type 1501, vilken
 R5 inte stöder. Originalfeeden är oförändrad. Det är en begränsning för
 kommande MVP-beräkningar som måste redovisas, inte ett fullständigt Skånenät.
 Det verifierade testet innehåller en tidtabellsenlig bussresa och gång.
-Samtliga 22 tester passerade. T90 och övriga robusthetsmått återstår.
+Samtliga 22 tester passerade i Phase 1.
+
+## Phase 2A: explicit T90_schedule
+
+Den första minutvisa analysen för Lomma station → Lund C är implementerad.
+Metod, alla frysta parametrar, processisolering, reproduktionskommandon
+och skillnader mot R5:s percentilsvar finns i
+[T90_DEFINITION.md](T90_DEFINITION.md). Ingen miljöändring behövdes.
+Resultat och workerlogg ligger i ignorerade outputs; originalfeeden
+och lokal paths.toml ingår inte i Git.
