@@ -119,6 +119,64 @@ def representatives(observations):
             for i,roles in sorted(chosen.items())]
 
 
+def positive_jumps(observations,limit=3):
+    """Rank positive adjacent changes, retaining unreachable transitions."""
+    jumps=[]
+    for i,(a,b) in enumerate(zip(observations,observations[1:])):
+        previous,current=a['duration_seconds'],b['duration_seconds']
+        if previous is None:continue
+        increase='UNREACHABLE' if current is None else current-previous
+        if increase=='UNREACHABLE' or increase>0:
+            jumps.append(dict(before_index=i,after_index=i+1,before_start=a['start'],
+                              after_start=b['start'],increase_seconds=increase))
+    jumps.sort(key=lambda j:(-float('inf') if j['increase_seconds']=='UNREACHABLE' else -j['increase_seconds'],j['before_index']))
+    return [dict(rank=i+1,**j) for i,j in enumerate(jumps[:limit])]
+
+
+def audited_representatives(observations,jumps):
+    """Merge percentile and jump roles, so each distinct minute is routed once."""
+    selected={r['index']:dict(**r,audit_roles=[]) for r in representatives(observations)}
+    for jump in jumps:
+        for side in ('before','after'):
+            i=jump[f'{side}_index'];row=observations[i]
+            selected.setdefault(i,dict(index=i,start=row['start'],percentile_roles=[],
+                status='UNREACHABLE' if row['duration_seconds'] is None else 'REACHABLE',audit_roles=[]))
+            selected[i]['audit_roles'].append(f"jump_{jump['rank']}_{side}")
+    return [selected[i] for i in sorted(selected)]
+
+
+def itinerary_timing(segments,ready):
+    """Verify clock-span/components and strictly feasible R5 boardings."""
+    cursor=datetime.fromisoformat(ready);boardings=[];valid=True
+    for index,leg in enumerate(segments):
+        depart=datetime.fromisoformat(leg['departure']);arrive=datetime.fromisoformat(leg['arrival'])
+        gap=(depart-cursor).total_seconds()
+        valid &= gap>=0 and (arrive-depart).total_seconds()==leg['travel_seconds']
+        valid &= gap==leg['wait_seconds']+leg['fixed_slack_seconds']
+        if leg['mode']!='WALK':
+            boardings.append(dict(segment=index,available_seconds=gap,required_seconds=60,
+                                  strict_feasible=gap>60,departure=leg['departure']))
+            valid &= gap>60
+        cursor=arrive
+    duration=(cursor-datetime.fromisoformat(ready)).total_seconds()
+    component_total=sum(l['travel_seconds']+l['wait_seconds']+l['fixed_slack_seconds'] for l in segments)
+    return dict(valid=bool(valid and duration==component_total),duration_seconds=duration,
+                component_total_seconds=component_total,boardings=boardings)
+
+
+def connect_walk_geometry(geometry,start,end):
+    """Expose R5 off-street connectors; these straight links are approximate."""
+    if geometry['type']!='LineString':raise ValueError('Expected a continuous walking path')
+    coords=[list(c) for c in geometry['coordinates']]
+    def distance(a,b):
+        return math.hypot((a[0]-b[0])*111320*math.cos(math.radians((a[1]+b[1])/2)),(a[1]-b[1])*111320)
+    if distance(coords[-1],start)+distance(coords[0],end)<distance(coords[0],start)+distance(coords[-1],end):coords.reverse()
+    lengths=dict(start=distance(coords[0],start),end=distance(coords[-1],end))
+    if lengths['start']>1:coords.insert(0,list(start))
+    if lengths['end']>1:coords.append(list(end))
+    return dict(type='LineString',coordinates=coords),lengths
+
+
 def validate_geojson(collection):
     if collection.get('type')!='FeatureCollection' or not isinstance(collection.get('features'),list):
         raise ValueError('Expected GeoJSON FeatureCollection')

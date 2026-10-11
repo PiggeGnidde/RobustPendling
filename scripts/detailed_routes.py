@@ -7,10 +7,10 @@ All leg snapshots below are independent, avoiding mutable access/egress reuse.
 from datetime import datetime,timedelta
 import copy
 import json
-from analysis_contract import family,mode_name,validate_geojson
+from analysis_contract import family,mode_name,validate_geojson,itinerary_timing,connect_walk_geometry
 
 
-def collect(network,origin,destination,representative,observation,feed_instant,trip_lookup,stop_names):
+def collect(network,origin,destination,representative,observation,feed_instant,trip_lookup,stop_names,stop_coordinates):
     import r5py
     import jpype
     import pandas as pd
@@ -19,6 +19,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
     from shapely import from_wkt,line_merge
     from r5py.r5.trip_planner import TripPlanner
     from t90_core import PARAMETERS
+    from r5_adapter import dominating_factory
     if r5py.__version__!='1.1.7':raise RuntimeError('Detailed adapter requires r5py 1.1.7')
     layer=network._transport_network.transitLayer
     ready=feed_instant.hour*3600+feed_instant.minute*60
@@ -54,7 +55,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             router=jpype.JClass('com.conveyal.r5.profile.McRaptorSuboptimalPathProfileRouter')
             req.fromTime,req.toTime,req.monteCarloDraws=ready-1,ready+1,1
             engine=router(network,request,times(planner._transit_access_paths),times(planner._transit_egress_paths),
-                          lambda _:jpype.JClass('com.conveyal.r5.profile.SuboptimalDominatingList')(max(req.suboptimalMinutes,0)),None,True)
+                          dominating_factory(layer,int(req.suboptimalMinutes)),None,True)
             field=router.class_.getDeclaredField('mersenneTwister');field.setAccessible(True)
             field.set(engine,jpype.JClass('org.apache.commons.math3.random.MersenneTwister')(0))
             engine.route()
@@ -125,6 +126,12 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             route=None if pd.isna(r.route_id) else str(r.route_id)
             # Source times are in feed timezone; display in request timezone.
             display_zone=datetime.fromisoformat(observation['start']).tzinfo
+            geometry=mapping(r.geometry)
+            connectors=None
+            if mode_name(r.transport_mode)=='WALK':
+                geometry,connectors=connect_walk_geometry(geometry,
+                    stop_coordinates[a] if a else (origin['lon'],origin['lat']),
+                    stop_coordinates[b] if b else (destination['lon'],destination['lat']))
             legs.append(dict(mode=mode_name(r.transport_mode),route_id=route,
                 line=line_lookup.get(route),
                 start_stop=a,end_stop=b,start_stop_name=stop_names.get(a) if a else origin['name'],
@@ -133,7 +140,9 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                 arrival=(depart+timedelta(seconds=duration)).astimezone(display_zone).isoformat(),
                 travel_seconds=duration,walking_seconds=duration if mode_name(r.transport_mode)=='WALK' else 0,
                 wait_seconds=r.wait_time.total_seconds(),fixed_slack_seconds=float(r.fixed_slack_seconds),
-                trip_id=None if pd.isna(r.trip_id) else str(r.trip_id),geometry=mapping(r.geometry)))
+                trip_id=None if pd.isna(r.trip_id) else str(r.trip_id),geometry=geometry,
+                geometry_source='R5_street_path_with_approximate_straight_connectors' if connectors else 'R5_GTFS_hops',
+                geometry_connectors_m=connectors))
         total=(datetime.fromisoformat(legs[-1]['arrival'])-datetime.fromisoformat(observation['start'])).total_seconds()
         walking=sum(l['walking_seconds'] for l in legs)
         if not 0<=total<=2700 or walking>900 or any(l['wait_seconds']<0 for l in legs):invalid+=1;continue
@@ -143,6 +152,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                   waiting_seconds=sum(l['wait_seconds'] for l in legs),
                   fixed_slack_seconds=sum(l['fixed_slack_seconds'] for l in legs),
                   transfers=max(len(rides)-1,0),segments=legs)
+        item['timing_validation']=itinerary_timing(legs,observation['start'])
         if f['id'] not in families or (total,walking,json.dumps(legs,sort_keys=True))<(families[f['id']]['duration_seconds'],families[f['id']]['walking_seconds'],json.dumps(families[f['id']]['segments'],sort_keys=True)):
             families[f['id']]=item
     primary_family=family(observation.get('rides',[]))['id']
@@ -157,10 +167,11 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             props={k:v for k,v in leg.items() if k!='geometry'}
             props.update(option=option,route_family=item['route_family']['id'],segment=index,
                          representative_start=observation['start'],percentile_role=representative['percentile_roles'],
+                         audit_roles=representative.get('audit_roles',[]),
                          slower_than_best_seconds=item['slower_than_best_seconds'])
             features.append(dict(type='Feature',geometry=leg['geometry'],properties=props))
     validate_geojson(dict(type='FeatureCollection',features=features))
-    matches=bool(options) and options[0]['duration_seconds']==best
+    matches=bool(options) and options[0]['duration_seconds']==best and options[0]['timing_validation']['valid']
     return dict(**representative,best_duration_seconds=best,best_r5_option=options[0] if options else None,
                 matches_sweep=matches,primary_route_family=primary_family,options=options,
                 diagnostics=dict(**diagnostics,raw_options=int(result.option.nunique()),

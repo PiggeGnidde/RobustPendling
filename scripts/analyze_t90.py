@@ -21,7 +21,8 @@ from smoke_helpers import gtfs_tables, select_station, routing_feed
 from t90_core import PARAMETERS, minute_grid, statistics, metadata, combinations, component_statistics
 from schedule_sweep import ScheduleSweep, load_trips
 from analysis_contract import (SCHEMA_VERSION,point,request_grid,area_check,family,
-                               structural_metrics,representatives,validate_geojson)
+                               structural_metrics,representatives,validate_geojson,
+                               positive_jumps,audited_representatives)
 
 
 def parser():
@@ -36,6 +37,8 @@ def parser():
             p.add_argument(f'--{endpoint}-{axis}',f'--{endpoint}_{axis}',type=float)
         p.add_argument(f'--{endpoint}-name',f'--{endpoint}_name')
     p.add_argument('--timezone', default='Europe/Stockholm')
+    p.add_argument('--audit-jumps',type=int,choices=range(4),default=0,
+                   help='Detail both sides of the largest 0 to 3 adjacent increases')
     p.add_argument('--output', type=Path, default=ROOT/'outputs/t90_schedule_lomma_lund.json')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--artifact-prefix',help=argparse.SUPPRESS)
@@ -91,8 +94,11 @@ def worker(args, grid):
     sys.argv = [sys.argv[0], '--max-memory', PARAMETERS['jvm_heap'], '--verbose']
     import r5py
     import jpype
+    from jvm_diagnostics import instrument_shutdown
+    instrument_shutdown()
     from r5py.r5.regional_task import RegionalTask
     from r5py.r5.trip_planner import TripPlanner
+    from r5_adapter import dominating_factory
     if r5py.__version__ != '1.1.7': raise RuntimeError('Adapter requires r5py 1.1.7')
     jar = ROOT/'cache/runtime/r5py/r5-v7.5.1-r5py-all.jar'
     if fingerprint(jar)['sha256'] != 'd50be106cadd7b636cfc0e209052767d7df570629f79fdf98ecd5cf5d2d89be7':
@@ -169,8 +175,7 @@ def worker(args, grid):
     seed = next(s for s in range(1000) if (lambda r:r.nextInt(2)==1 and r.nextInt(2)==1)(rng_class(s)))
     def router(req):
         return router_class(network,req,access_java,egress_java,
-                            lambda _:jpype.JClass('com.conveyal.r5.profile.SuboptimalDominatingList')(
-                                max(req.suboptimalMinutes,0)),None,True)
+                            dominating_factory(layer,int(req.suboptimalMinutes)),None,True)
     def state_result(state, ready):
         chain = []
         current = state
@@ -186,6 +191,7 @@ def worker(args, grid):
                 pattern = layer.tripPatterns.get(current.pattern)
                 info = layer.routes.get(pattern.routeIndex)
                 rides.append(dict(route_id=str(info.route_id),line=str(info.route_short_name),
+                    trip_id=str(pattern.tripSchedules.get(current.trip).tripId).split(':',1)[-1],
                     mode=str(info.route_type),start_stop=ids[int(previous.stop)],end_stop=ids[int(current.stop)],
                     departure_seconds=int(current.boardTime),arrival_seconds=int(current.time)))
         duration = int(state.time)-ready+PARAMETERS['egress_slack_seconds']
@@ -212,6 +218,7 @@ def worker(args, grid):
         if direct_walk is not None and direct_walk<=900:
             value=direct_walk if value is None else min(value,direct_walk)
         comparisons.append(dict(start=row['start'],evaluated_seconds=keys,raw_r5_seconds=value,
+                                raw_best_rides=best['rides'] if best else [],
                                 explicit_seconds=row['duration_seconds'],equal=value==row['duration_seconds']))
     native = copy.copy(request)._regional_task
     # Do not use 60 draws for a shorter CLI window: R5 can otherwise create
@@ -255,13 +262,15 @@ def worker(args, grid):
                   window_minutes=len(grid),network_area=area,schema_version=SCHEMA_VERSION,
                   feed_timezone=feed_timezone,feed_service_date=grid[0].date().isoformat(),
                   allow_pure_walk=True,geometry_crs='EPSG:4326',
+                  audit_jumps=args.audit_jumps,
+                  r5_permission_adapter='filter_before_dominance_pruning',
                   sweep='exhaustive_one_or_two_rides_on_R5_walking_links',
                   exact_r5_adapter_seed=seed, exact_r5_interval_seconds=2)
     frozen['native_diagnostic_draws'] = int(native.monteCarloDraws)
     hashes = dict(osm=fingerprint(inputs['osm']),gtfs_original=fingerprint(inputs['gtfs']),
                   gtfs_derived=fingerprint(derived),r5_jar=fingerprint(jar),
                   code={name:fingerprint(ROOT/'scripts'/name) for name in
-                        ('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py')})
+                        ('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py')})
     if initial_hashes != dict(osm=hashes['osm'],gtfs=hashes['gtfs_original']):
         raise RuntimeError('Input changed during the experiment; no result published')
     versions = dict(python=sys.version.split()[0],r5py=r5py.__version__,r5='7.5.1-r5py',
@@ -271,13 +280,15 @@ def worker(args, grid):
     for row in observations:
         if row['duration_seconds'] is not None:
             f=family(row['rides']);registry.setdefault(f['id'],dict(**f,selected_count=0))['selected_count']+=1
-    for role in representatives(observations):
+    jumps=positive_jumps(observations,args.audit_jumps)
+    for role in audited_representatives(observations,jumps):
         index=role['index'];row=observations[index]
         if row['duration_seconds'] is None:
             representative_itineraries.append(dict(**role,best_duration_seconds=None,best_r5_option=None,options=[],matches_sweep=None));continue
         calls+=1
         item,geo=collect(network,origin,destination,role,row,grid[index],{t['id']:t for t in trips},
-                         {s['stop_id']:s['stop_name'] for s in stops})
+                         {s['stop_id']:s['stop_name'] for s in stops},
+                         {s['stop_id']:(float(s['stop_lon']),float(s['stop_lat'])) for s in stops})
         representative_itineraries.append(item);features.extend(geo)
         for option in item['options']:
             f=option['route_family'];registry.setdefault(f['id'],dict(**f,selected_count=0))
@@ -302,6 +313,7 @@ def worker(args, grid):
                   'ROUTING_MISMATCH' if not exact_matches else 'OK'),
                   metadata=metadata(hashes,versions,requested_grid,frozen),derivation=derivation,network_area=area,
                   metrics=structural_metrics(observations),minute_observations=observations,
+                  departure_jumps=jumps,
                   representative_itineraries=representative_itineraries,route_families=sorted(registry.values(),key=lambda f:f['id']),
                   alternatives=alternatives,geojson_path=geo_path.relative_to(ROOT).as_posix(),
                   geojson_sha256=fingerprint(geo_path)['sha256'],geojson_canonical_sha256=geometry_hash,
@@ -324,6 +336,7 @@ def worker(args, grid):
                                'no operational delay/cancellation observations'])
     atomic_json(args.output,report)
     print('RESULT_WRITTEN_ATOMICALLY',flush=True)
+    print('RESULT_WRITTEN_ATOMICALLY',file=sys.stderr,flush=True)
 
 
 def main():
@@ -347,10 +360,12 @@ def main():
         worker(args,grid)
     else:
         log = args.output.with_suffix('.worker.log')
+        stderr_log=args.output.with_suffix('.worker.stderr.log')
         work_result = args.output.with_suffix('.worker.json')
         command = [sys.executable,'-B',str(Path(__file__).resolve()),'--worker','--config',str(args.config.resolve()),
                    '--date',args.date,'--start',args.start,'--window-minutes',str(len(grid)),'--timezone',args.timezone,
                    '--output',str(work_result),'--artifact-prefix',args.output.stem]
+        command.extend(['--audit-jumps',str(args.audit_jumps)])
         for endpoint in ('from','to'):
             for field in ('lat','lon','name'):
                 value=getattr(args,f'{endpoint}_{field}')
@@ -358,13 +373,25 @@ def main():
         # Remove only our previous temporary result, so a failed worker cannot
         # be mistaken for a new success. Preserve the previous final result.
         work_result.unlink(missing_ok=True)
-        with log.open('w',encoding='utf-8') as stream:
-            job = subprocess.run(command,stdout=stream,stderr=subprocess.STDOUT,check=False)
+        started=time.perf_counter()
+        with log.open('w',encoding='utf-8') as stream,stderr_log.open('w',encoding='utf-8') as errors:
+            job = subprocess.Popen(command,stdout=stream,stderr=errors)
+            job.wait()
+        stderr=stderr_log.read_text(encoding='utf-8')
+        from jvm_diagnostics import cleanup_after_exit
+        cleanup=cleanup_after_exit(stderr)
+        with log.open('a',encoding='utf-8') as stream:
+            stream.write('\n--- WORKER STDERR ---\n'+stderr)
         if not work_result.is_file():
             raise RuntimeError(f'Routing worker failed (exit {job.returncode}); inspect {log}')
         report = json.loads(work_result.read_text(encoding='utf-8'))
         report['worker'] = dict(exit_code=job.returncode,log=str(log),
-                               jpype_shutdown_error='PyExceptionProxy' in log.read_text(encoding='utf-8'),
+                               stderr_log=str(stderr_log),pid=job.pid,exited=job.poll() is not None,
+                               elapsed_seconds=time.perf_counter()-started,
+                               jpype_shutdown_error='PyExceptionProxy' in stderr,
+                               cleanup_success='JVM_CLEANUP_OK' in stderr,
+                               cleanup_deferred=bool(cleanup),cleanup_after_exit=cleanup,
+                               shutdown_stderr=stderr[stderr.find('RESULT_WRITTEN_ATOMICALLY'):] if 'RESULT_WRITTEN_ATOMICALLY' in stderr else stderr[-2000:],
                                result_status='VALID' if job.returncode==0 else 'DIAGNOSTIC')
         atomic_json(args.output,report)
         print(json.dumps(dict(status=report['status'],metrics=report['metrics'],

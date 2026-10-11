@@ -1,9 +1,13 @@
-# Phase 2B: A–B-analyskontrakt, schema 2.0
+# A–B-analyskontrakt, schema 2.0 (Phase 2B/2C)
 
 CLI:n `scripts/analyze_t90.py` är anropsgränsen för ett framtida webbgränssnitt.
 Ingen webbserver ingår. Metoden är **T90_schedule/R0**, variation i statisk
 tidtabell, med definition och databegränsningar i [T90_DEFINITION.md](T90_DEFINITION.md).
 Den beskriver inte observerad punktlighet, förseningar eller inställda turer.
+**Schedule-kvantiler mäter variation över startminuter, varken faktisk
+försening eller sannolikheten att komma fram i tid.** Phase 2C:s validering
+och kvarstående databegränsningar finns i
+[PHASE_2C_VALIDATION.md](PHASE_2C_VALIDATION.md).
 
 ## Anrop
 
@@ -109,6 +113,12 @@ första startminuten med den aktuella restiden; flera roller för samma
 observation samlas. Ej nåbara representanter behålls men routas inte.
 Nätverket byggs **en gång**. DetailedItineraries körs endast för distinkta,
 nåbara representanter, högst fem, inte för alla 60 minuter.
+Med `--audit-jumps 3` tillkommer båda sidor om de tre största positiva
+restidshoppen; överlappande minuter analyseras en gång. `departure_jumps`
+lagrar rank, minutindex, klockslag och ökning. Detaljresor och features får
+`audit_roles`, exempelvis jump_1_before, och tom percentile_role om minuten
+endast är en hopprepresentant. Hopp till UNREACHABLE behålls och rankas
+före ändliga hopp; saknad resa får ingen påhittad geometri.
 
 Den versionsbundna adaptern ersätter DetailedItineraries OD-hook så att
 R5 verkligen utvärderar exakt sekund och samtliga slutalternativ bevaras.
@@ -117,6 +127,10 @@ muterbara access/egress-ben. Adaptern kopierar varje segment separat.
 R5:s slutalternativ filtreras med samma gång-/restidsbudget och
 pickup/dropoff-regler, dedupliceras per family och behåller snabbaste
 alternativet, sedan lägst gångtid och deterministisk segmentordning.
+Phase 2C filtrerar GTFS-pickup/dropoff redan **före dominanspruning** via
+en versionsbunden DominatingList-adapter. Otillåten avstigning får inte
+slå ut giltiga alternativ. Varje alternativ har `timing_validation` för
+klockspann, komponenter och strikt möjliga boardings inklusive bytesgång.
 `slower_than_best_seconds` avser sweepens verifierade optimum; noll är
 tillåtet för likvärdigt alternativ. R5:s suboptimalMinutes=5 begränsar
 alternativsökningen: den är **inte** en uttömmande lista över alla resvägar,
@@ -135,6 +149,11 @@ option-numret är lokalt för representativ minut. Väntan tillhör följande
 transitsegment och är inte en separat linjegeometri. Slutlig 60-s-marginal
 redovisas separat. Punktnamn används vid gångresans yttre ändpunkter, utan
 påhittade GTFS-ID:n. Geometrin valideras som ändliga lon/lat-koordinater.
+WALK kompletteras vid behov med approximativa raka anslutningar från
+GTFS-/anropspunkt till R5:s snappade gata. `geometry_source` och
+`geometry_connectors_m` skiljer dessa från nätets gatungeometri.
+Tid/kvantiler ändras inte av kartkompletteringen; fysisk tillgänglighet
+genom exempelvis en station är inte verifierad av en rak anslutning.
 
 GeoJSON skrivs atomiskt först till ett innehållsnamngivet filnamn, därefter
 JSON-resultatet atomiskt. `geojson_sha256` verifierar faktiska filbytes;
@@ -143,8 +162,19 @@ Inputhashar kontrolleras före och efter routing. Metadatahashen undantar
 körtider, loggsökväg och processdiagnostik. Hela outputs är Git-ignorerad.
 JVM-isoleringen behålls; PyExceptionProxy vid avslut loggas fortfarande
 och redovisas som worker.jpype_shutdown_error=true även när exit_code=0.
+Detta var Phase 2B:s avslutsläge. Phase 2C lokaliserar WinError 32 i
+GeoTools EPSG-databasens temporärstädning och skjuter upp just denna
+städning tills workerprocessen avslutats. Full traceback bevaras i
+separat `worker.stderr_log` och `shutdown_stderr`. `cleanup_deferred` samt
+`cleanup_after_exit[].removed` visar utfallet; `cleanup_success` avser
+hookens ursprungliga försök. PID, exitkod, exited och elapsed_seconds
+redovisas som körmetadata. Paketet ändras inte och andra fel undertrycks inte.
 
 ## Verifierat Lomma–Lund-resultat
+
+Nedan är Phase 2B:s historiska artefakthashar, testantal och fyra
+representanter. Aktuella Phase 2C-körningar med hoppgranskning redovisas i
+PHASE_2C_VALIDATION.md; restidsfördelningen är oförändrad.
 
 2026-10-12 kl. 07:00–07:59, 60 minuter:
 
