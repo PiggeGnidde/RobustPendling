@@ -1,0 +1,655 @@
+{
+  "schema_version": "public-nminus-summary-1",
+  "description": "Extracted from validated saved results; no new routing. Not an API response or complete routing dataset.",
+  "date": "2026-10-12",
+  "timezone": "Europe/Stockholm",
+  "window": {
+    "start": "07:00:00",
+    "end": "07:59:59",
+    "start_minutes": 60
+  },
+  "information_assumption": "At the failed leg scheduled departure, already at its boarding stop",
+  "horizon_seconds": 7200,
+  "parameters": {
+    "walk_speed_kmh": 3.6,
+    "max_time_seconds": 2700,
+    "max_walk_seconds": 900,
+    "max_rides": 2,
+    "board_slack_seconds": 60,
+    "boarding_rule": "departure > arrival_at_stop + 60",
+    "egress_slack_seconds": 60,
+    "modes": [
+      "WALK",
+      "TRANSIT"
+    ],
+    "percentile_method": "nearest_rank_ceiling",
+    "missing": "positive_infinity",
+    "jvm_heap": "4G",
+    "frequencies_policy": "reject_nonempty",
+    "pickup_dropoff_policy": "allow 0 and 3; reject 1 and 2",
+    "tie_break": "duration, walking, lexicographic trip/boarding/alighting IDs"
+  },
+  "versions": {
+    "python": "3.12.15",
+    "r5py": "1.1.7",
+    "r5": "7.5.1-r5py",
+    "java": "21.0.10"
+  },
+  "input_hashes": {
+    "osm": {
+      "size_bytes": 9687479,
+      "sha256": "47942e06ea6c96c8893933f71f448f7e1deac9d906c216a16c60a414db521b9d"
+    },
+    "gtfs_original": {
+      "size_bytes": 38123482,
+      "sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182"
+    },
+    "gtfs_derived": {
+      "size_bytes": 38027108,
+      "sha256": "0a43ea916ed78a0d26a71e471483a0ee07bf1131fd0e7504be03ac7f6a1d6a9f"
+    },
+    "r5_jar": {
+      "size_bytes": 64437972,
+      "sha256": "d50be106cadd7b636cfc0e209052767d7df570629f79fdf98ecd5cf5d2d89be7"
+    }
+  },
+  "code_hashes": {
+    "nminus_core.py": {
+      "size_bytes": 4785,
+      "sha256": "4e6cbcb6256540d4ff5f83812c1b991f2298e257ab760da2737c22ad52910d09"
+    },
+    "nminus_engine.py": {
+      "size_bytes": 20254,
+      "sha256": "2dd6707445028eda3cb93e42b61771c27dfda6db598d22e51457dde90a4b92d5"
+    },
+    "schedule_sweep.py": {
+      "size_bytes": 7250,
+      "sha256": "d0316375333c81c60157c3504b8a50f2cc5b8c4ff7c1bc0c03a56d03c1624de4"
+    },
+    "r5_adapter.py": {
+      "size_bytes": 1307,
+      "sha256": "074e832fb643fa91311d3122df6933910ddf3e2df8ce4f1fbfc0440e5664fa48"
+    }
+  },
+  "cases": [
+    {
+      "relation": "lomma_lund",
+      "source_result_sha256": "42e849cdb58f746475c72ce65d09a95696cc3e81a10b17ecf02b13428cdf215b",
+      "base_metrics": {
+        "count": 60,
+        "reachable_count": 60,
+        "unreachable_count": 0,
+        "route_coverage": 1.0,
+        "percentiles_seconds": {
+          "T50": 2177,
+          "T90": 2357,
+          "T99": 2537
+        },
+        "minimum_seconds": 1937,
+        "maximum_seconds": 2537,
+        "mean_seconds": 2183.0,
+        "reachable_mean_seconds": 2183.0,
+        "buffer_90": 180,
+        "buffer_99": 360,
+        "full_range": 600,
+        "dominant_route_family": "rf_f1377e5f46399b86fe5043ef9e3e9d333aec71e0d194939fa9e49635b89f014a",
+        "dominant_route_share": 1.0,
+        "dominant_route_share_all_minutes": 1.0,
+        "distinct_selected_route_families": 1,
+        "transfer_count_distribution": {
+          "0": 60
+        },
+        "departure_sensitivity": {
+          "seconds": 600,
+          "from_start": "2026-10-12T07:35:00+02:00",
+          "to_start": "2026-10-12T07:36:00+02:00"
+        },
+        "unreachable_transitions": {}
+      },
+      "scenarios": {
+        "1": {
+          "summary": {
+            "applicable_count": 60,
+            "not_applicable_count": 0,
+            "reachable_count": 60,
+            "unreachable_count": 0,
+            "coverage": 1.0,
+            "conditional": false,
+            "total_percentiles_seconds": {
+              "T50": 2657,
+              "T90": 2837,
+              "T99": 2957
+            },
+            "extra_percentiles_seconds": {
+              "P50": 420,
+              "P90": 660
+            },
+            "maximum_extra_seconds": 660,
+            "percentile_population": "reachable applicable scenarios; nearest rank; equal minute weights"
+          },
+          "maximum_extra_example": {
+            "start": "2026-10-12T07:29:00+02:00",
+            "failed_instance": {
+              "feed": "SE-st",
+              "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+              "trip_id": "121120000397070163",
+              "service_date": "2026-10-12",
+              "r5_scoped_trip_id": "SE-st:121120000397070163"
+            },
+            "failed_leg": {
+              "trip_id": "121120000397070163",
+              "route_id": "9011012013900000",
+              "line": "139",
+              "mode": "700",
+              "start_stop": "9022012062070025",
+              "end_stop": "9022012081216014",
+              "departure_seconds": 27728,
+              "arrival_seconds": 28920
+            },
+            "notification": {
+              "stop_id": "9022012062070025",
+              "stop_name": "Lomma Strandvägen",
+              "coordinates": [
+                13.071822,
+                55.67581
+              ],
+              "time": "2026-10-12T07:42:08+02:00"
+            },
+            "completed_elapsed_seconds": 788,
+            "reserve_segments": [
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lomma Strandvägen",
+                "end_stop_name": "Lomma Strandvägen",
+                "departure": "2026-10-12T07:42:08+02:00",
+                "arrival": "2026-10-12T07:42:08+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "BUS",
+                "line": "139",
+                "trip_id": "121120000397067953",
+                "start_stop_name": "Lomma Strandvägen",
+                "end_stop_name": "Lund C",
+                "departure": "2026-10-12T07:51:16+02:00",
+                "arrival": "2026-10-12T08:13:00+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 548,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lund C",
+                "end_stop_name": "Lund C",
+                "departure": "2026-10-12T08:14:00+02:00",
+                "arrival": "2026-10-12T08:18:17+02:00",
+                "walking_seconds": 257,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 60
+              }
+            ],
+            "total_seconds": 2957,
+            "extra_seconds": 660
+          }
+        }
+      }
+    },
+    {
+      "relation": "malmo_varnhem",
+      "source_result_sha256": "3cbe7b727be92f07baedab5413ecdc084ce5bef53344ae1672082b03ffc98886",
+      "base_metrics": {
+        "count": 60,
+        "reachable_count": 60,
+        "unreachable_count": 0,
+        "route_coverage": 1.0,
+        "percentiles_seconds": {
+          "T50": 986,
+          "T90": 1166,
+          "T99": 1226
+        },
+        "minimum_seconds": 806,
+        "maximum_seconds": 1226,
+        "mean_seconds": 991.3833333333333,
+        "reachable_mean_seconds": 991.3833333333333,
+        "buffer_90": 180,
+        "buffer_99": 240,
+        "full_range": 420,
+        "dominant_route_family": "rf_e8a253856463f806c452ec0cd68ff89b0d7cd31df4df31ad60f4d234915ba19e",
+        "dominant_route_share": 0.8666666666666667,
+        "dominant_route_share_all_minutes": 0.8666666666666667,
+        "distinct_selected_route_families": 4,
+        "transfer_count_distribution": {
+          "0": 59,
+          "1": 1
+        },
+        "departure_sensitivity": {
+          "seconds": 420,
+          "from_start": "2026-10-12T07:26:00+02:00",
+          "to_start": "2026-10-12T07:27:00+02:00"
+        },
+        "unreachable_transitions": {}
+      },
+      "scenarios": {
+        "1": {
+          "summary": {
+            "applicable_count": 60,
+            "not_applicable_count": 0,
+            "reachable_count": 60,
+            "unreachable_count": 0,
+            "coverage": 1.0,
+            "conditional": false,
+            "total_percentiles_seconds": {
+              "T50": 1353,
+              "T90": 1586,
+              "T99": 1646
+            },
+            "extra_percentiles_seconds": {
+              "P50": 420,
+              "P90": 480
+            },
+            "maximum_extra_seconds": 480,
+            "percentile_population": "reachable applicable scenarios; nearest rank; equal minute weights"
+          },
+          "maximum_extra_example": {
+            "start": "2026-10-12T07:20:00+02:00",
+            "failed_instance": {
+              "feed": "SE-st",
+              "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+              "trip_id": "121120000400410364",
+              "service_date": "2026-10-12",
+              "r5_scoped_trip_id": "SE-st:121120000400410364"
+            },
+            "failed_leg": {
+              "trip_id": "121120000400410364",
+              "route_id": "9011012000900000",
+              "line": "9",
+              "mode": "700",
+              "start_stop": "9022012080000001",
+              "end_stop": "9022012080110010",
+              "departure_seconds": 26880,
+              "arrival_seconds": 27360
+            },
+            "notification": {
+              "stop_id": "9022012080000001",
+              "stop_name": "Malmö C",
+              "coordinates": [
+                13.000437,
+                55.608575
+              ],
+              "time": "2026-10-12T07:28:00+02:00"
+            },
+            "completed_elapsed_seconds": 480,
+            "reserve_segments": [
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Malmö C",
+                "end_stop_name": "Malmö C",
+                "departure": "2026-10-12T07:28:00+02:00",
+                "arrival": "2026-10-12T07:28:00+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "BUS",
+                "line": "9",
+                "trip_id": "121120000400410021",
+                "start_stop_name": "Malmö C",
+                "end_stop_name": "Malmö Värnhem",
+                "departure": "2026-10-12T07:36:00+02:00",
+                "arrival": "2026-10-12T07:44:00+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 480,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Malmö Värnhem",
+                "end_stop_name": "Malmö Värnhem",
+                "departure": "2026-10-12T07:45:00+02:00",
+                "arrival": "2026-10-12T07:47:26+02:00",
+                "walking_seconds": 146,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 60
+              }
+            ],
+            "total_seconds": 1646,
+            "extra_seconds": 480
+          }
+        },
+        "2": {
+          "summary": {
+            "applicable_count": 1,
+            "not_applicable_count": 59,
+            "reachable_count": 1,
+            "unreachable_count": 0,
+            "coverage": 1.0,
+            "conditional": false,
+            "total_percentiles_seconds": {
+              "T50": 1622,
+              "T90": 1622,
+              "T99": 1622
+            },
+            "extra_percentiles_seconds": {
+              "P50": 480,
+              "P90": 480
+            },
+            "maximum_extra_seconds": 480,
+            "percentile_population": "reachable applicable scenarios; nearest rank; equal minute weights"
+          },
+          "maximum_extra_example": {
+            "start": "2026-10-12T07:05:00+02:00",
+            "failed_instance": {
+              "feed": "SE-st",
+              "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+              "trip_id": "121120000400892574",
+              "service_date": "2026-10-12",
+              "r5_scoped_trip_id": "SE-st:121120000400892574"
+            },
+            "failed_leg": {
+              "trip_id": "121120000400892574",
+              "route_id": "9011012000300000",
+              "line": "3",
+              "mode": "700",
+              "start_stop": "9022012080014001",
+              "end_stop": "9022012080110003",
+              "departure_seconds": 26114,
+              "arrival_seconds": 26460
+            },
+            "notification": {
+              "stop_id": "9022012080014001",
+              "stop_name": "Malmö Frihamnen",
+              "coordinates": [
+                13.013068,
+                55.611541
+              ],
+              "time": "2026-10-12T07:15:14+02:00"
+            },
+            "completed_elapsed_seconds": 614,
+            "reserve_segments": [
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Malmö Frihamnen",
+                "end_stop_name": "Malmö Frihamnen",
+                "departure": "2026-10-12T07:15:14+02:00",
+                "arrival": "2026-10-12T07:15:14+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "BUS",
+                "line": "3",
+                "trip_id": "121120000400892636",
+                "start_stop_name": "Malmö Frihamnen",
+                "end_stop_name": "Malmö Värnhem",
+                "departure": "2026-10-12T07:23:14+02:00",
+                "arrival": "2026-10-12T07:29:00+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 480,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Malmö Värnhem",
+                "end_stop_name": "Malmö Värnhem",
+                "departure": "2026-10-12T07:30:00+02:00",
+                "arrival": "2026-10-12T07:32:02+02:00",
+                "walking_seconds": 122,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 60
+              }
+            ],
+            "total_seconds": 1622,
+            "extra_seconds": 480
+          }
+        }
+      }
+    },
+    {
+      "relation": "gunnesbo_ideon",
+      "source_result_sha256": "8ad6828a7a856976c1aab56e1dc7b25b83a6ed2b9fab17c32194bcfc6b35604f",
+      "base_metrics": {
+        "count": 60,
+        "reachable_count": 60,
+        "unreachable_count": 0,
+        "route_coverage": 1.0,
+        "percentiles_seconds": {
+          "T50": 1976,
+          "T90": 2276,
+          "T99": 2512
+        },
+        "minimum_seconds": 1316,
+        "maximum_seconds": 2512,
+        "mean_seconds": 1949.85,
+        "reachable_mean_seconds": 1949.85,
+        "buffer_90": 300,
+        "buffer_99": 536,
+        "full_range": 1196,
+        "dominant_route_family": "rf_1b3ca7a323c66475ae1d5700760eef99cc9d0576a41d560c3451b90e7dfa4177",
+        "dominant_route_share": 0.38333333333333336,
+        "dominant_route_share_all_minutes": 0.38333333333333336,
+        "distinct_selected_route_families": 5,
+        "transfer_count_distribution": {
+          "1": 60
+        },
+        "departure_sensitivity": {
+          "seconds": 993,
+          "from_start": "2026-10-12T07:26:00+02:00",
+          "to_start": "2026-10-12T07:27:00+02:00"
+        },
+        "unreachable_transitions": {}
+      },
+      "scenarios": {
+        "1": {
+          "summary": {
+            "applicable_count": 60,
+            "not_applicable_count": 0,
+            "reachable_count": 60,
+            "unreachable_count": 0,
+            "coverage": 1.0,
+            "conditional": false,
+            "total_percentiles_seconds": {
+              "T50": 2516,
+              "T90": 2872,
+              "T99": 3232
+            },
+            "extra_percentiles_seconds": {
+              "P50": 480,
+              "P90": 1053
+            },
+            "maximum_extra_seconds": 1053,
+            "percentile_population": "reachable applicable scenarios; nearest rank; equal minute weights"
+          },
+          "maximum_extra_example": {
+            "start": "2026-10-12T07:15:00+02:00",
+            "failed_instance": {
+              "feed": "SE-st",
+              "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+              "trip_id": "121120000389455877",
+              "service_date": "2026-10-12",
+              "r5_scoped_trip_id": "SE-st:121120000389455877"
+            },
+            "failed_leg": {
+              "trip_id": "121120000389455877",
+              "route_id": "9011012081700000",
+              "line": "817",
+              "mode": "100",
+              "start_stop": "9022012081215041",
+              "end_stop": "9022012081216042",
+              "departure_seconds": 26880,
+              "arrival_seconds": 27120
+            },
+            "notification": {
+              "stop_id": "9022012081215041",
+              "stop_name": "Lund Gunnesbo station",
+              "coordinates": [
+                13.167945,
+                55.726534
+              ],
+              "time": "2026-10-12T07:28:00+02:00"
+            },
+            "completed_elapsed_seconds": 780,
+            "reserve_segments": [
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lund Gunnesbo station",
+                "end_stop_name": "Lund Gunnesbo station",
+                "departure": "2026-10-12T07:28:00+02:00",
+                "arrival": "2026-10-12T07:31:39+02:00",
+                "walking_seconds": 219,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "BUS",
+                "line": "4",
+                "trip_id": "121120000384671732",
+                "start_stop_name": "Lund Gunnesbo station",
+                "end_stop_name": "Lund Universitetssjukhuset",
+                "departure": "2026-10-12T07:33:58+02:00",
+                "arrival": "2026-10-12T07:56:12+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 139,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "BUS",
+                "line": "6",
+                "trip_id": "121120000396514498",
+                "start_stop_name": "Lund Universitetssjukhuset",
+                "end_stop_name": "Lund Scheeleparken",
+                "departure": "2026-10-12T07:59:16+02:00",
+                "arrival": "2026-10-12T08:04:04+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 184,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lund Scheeleparken",
+                "end_stop_name": "Lund Ideontorget",
+                "departure": "2026-10-12T08:05:04+02:00",
+                "arrival": "2026-10-12T08:08:52+02:00",
+                "walking_seconds": 228,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 60
+              }
+            ],
+            "total_seconds": 3232,
+            "extra_seconds": 1053
+          }
+        },
+        "2": {
+          "summary": {
+            "applicable_count": 60,
+            "not_applicable_count": 0,
+            "reachable_count": 60,
+            "unreachable_count": 0,
+            "coverage": 1.0,
+            "conditional": false,
+            "total_percentiles_seconds": {
+              "T50": 2276,
+              "T90": 2696,
+              "T99": 2932
+            },
+            "extra_percentiles_seconds": {
+              "P50": 416,
+              "P90": 443
+            },
+            "maximum_extra_seconds": 480,
+            "percentile_population": "reachable applicable scenarios; nearest rank; equal minute weights"
+          },
+          "maximum_extra_example": {
+            "start": "2026-10-12T07:09:00+02:00",
+            "failed_instance": {
+              "feed": "SE-st",
+              "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+              "trip_id": "121120000399736049",
+              "service_date": "2026-10-12",
+              "r5_scoped_trip_id": "SE-st:121120000399736049"
+            },
+            "failed_leg": {
+              "trip_id": "121120000399736049",
+              "route_id": "9011012073700000",
+              "line": "1",
+              "mode": "900",
+              "start_stop": "9022012081216001",
+              "end_stop": "9022012081125001",
+              "departure_seconds": 27420,
+              "arrival_seconds": 27798
+            },
+            "notification": {
+              "stop_id": "9022012081216001",
+              "stop_name": "Lund C",
+              "coordinates": [
+                13.188276,
+                55.707274
+              ],
+              "time": "2026-10-12T07:37:00+02:00"
+            },
+            "completed_elapsed_seconds": 1680,
+            "reserve_segments": [
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lund C",
+                "end_stop_name": "Lund C",
+                "departure": "2026-10-12T07:37:00+02:00",
+                "arrival": "2026-10-12T07:37:00+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "TRAM",
+                "line": "1",
+                "trip_id": "121120000399736065",
+                "start_stop_name": "Lund C",
+                "end_stop_name": "Lund Ideontorget",
+                "departure": "2026-10-12T07:45:00+02:00",
+                "arrival": "2026-10-12T07:51:18+02:00",
+                "walking_seconds": 0,
+                "wait_seconds": 480,
+                "fixed_slack_seconds": 0
+              },
+              {
+                "mode": "WALK",
+                "line": null,
+                "trip_id": null,
+                "start_stop_name": "Lund Ideontorget",
+                "end_stop_name": "Lund Ideontorget",
+                "departure": "2026-10-12T07:52:18+02:00",
+                "arrival": "2026-10-12T07:53:56+02:00",
+                "walking_seconds": 98,
+                "wait_seconds": 0,
+                "fixed_slack_seconds": 60
+              }
+            ],
+            "total_seconds": 2696,
+            "extra_seconds": 480
+          }
+        }
+      }
+    }
+  ]
+}
