@@ -10,7 +10,7 @@ from planner_core import routing_parameters,combined_nminus
 
 def validate_result(result,base):
     frozen=base.get('metadata',{}).get('parameters',{})
-    parameters=routing_parameters(frozen.get('max_rides',2),frozen.get('max_time_seconds',2700))
+    parameters=routing_parameters(frozen.get('max_rides',2),frozen.get('max_time_seconds',2700),frozen.get('walk_speed_kmh',3.6),frozen.get('max_walk_seconds',900))
     if 'canonical_sha256' in result:
         canonical={k:v for k,v in result.items() if k not in ('canonical_sha256','analysis_id','source')}
         checksum=hashlib.sha256(json.dumps(canonical,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()

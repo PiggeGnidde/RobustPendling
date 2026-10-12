@@ -21,14 +21,21 @@ class ReviewTests(unittest.TestCase):
     def test_two_hour_default_and_historical_cache_are_distinct(self):
         req=normalize(self.request())
         self.assertEqual(req['max_time_minutes'],120)
-        historic=normalize(dict(self.request(),max_time_minutes=45))
+        historic=normalize(dict(self.request(),max_time_minutes=45,walk_speed_kmh=3.6,max_walk_minutes=15))
         self.assertNotEqual(digest(req),digest(historic))
         report=dict(metadata=dict(date=req['date'],timezone=req['timezone'],start_minutes=['2026-10-12T07:00:00+02:00']*60,
-                    parameters=dict(max_time_seconds=2700,max_rides=2,
+                    parameters=dict(max_time_seconds=2700,max_rides=2,walk_speed_kmh=3.6,max_walk_seconds=900,
                     origin=dict(lat=req['from_lat'],lon=req['from_lon'],name=''),destination=dict(lat=req['to_lat'],lon=req['to_lon'],name=''))))
         self.assertEqual(request_from_report(report),historic)
         for horizon in (0,121,True,120.0):
             with self.assertRaises(ValueError):normalize(dict(self.request(),max_time_minutes=horizon))
+        self.assertEqual(req['walk_speed_kmh'],4.5);self.assertEqual(req['max_walk_minutes'],20)
+        for speed in (2.9,6.1,True,float('nan')):
+            with self.assertRaises(ValueError):normalize(dict(self.request(),walk_speed_kmh=speed))
+        for minutes in (9,31,True,20.5):
+            with self.assertRaises(ValueError):normalize(dict(self.request(),max_walk_minutes=minutes))
+        for key,value in [('walk_speed_kmh',3),('max_walk_minutes',30)]:
+            self.assertNotEqual(digest(req),digest(normalize(dict(self.request(),**{key:value}))))
 
     def request(self):
         return dict(from_lat=55.67,from_lon=13.07,to_lat=55.70,to_lon=13.18,

@@ -8,10 +8,16 @@ Klart: kartklick/redigerbara koordinater, datum-/områdeskontroll, 1–4 ben
 genom både R5 och oberoende sökning, separata bortfall med bevarat prefix,
 samlat N−1 inklusive +∞ och gångundantag, deadline som prövar varje minut,
 cache och ett återanvänt nätverk per worker. Efter horisontkorrigeringen
-passerar 79 tester. Ett verkligt minutprov över 45 min matchar rå R5 och
+passerar 84 tester. Exakt profilåteranvändning och konfigurerbar gång är nu
+införda; se SCHEDULE_PROFILE.md och PLANNER_VALIDATION.md. Ett verkligt minutprov över 45 min matchar rå R5 och
 oberoende sökning (54:06); nya analyser söker upp till 120 min. Alla 180
 ursprungliga basminuter matchar, och sex N−1-arkiv är bevarade/verifierade.
 Verklig fyrabensreserv och trebensfortsättning verifierade på ett litet prov.
+Senaste kontroller: 240 profilminuter matchar sparade observationer, 180
+originalminuter matchar separat sweep/rå R5, nytt 120-minutersfönster och
+enminuts-N−1 med båda benens bortfall är verifierade. 60-minuterssökningen
+med samma tidigare indata gick från 350,47 s till 29,86 s. Första nya
+120-minutersanropet tog 131,3 s inklusive alla kontroller och nätverksstart.
 Se [PLANNER_VALIDATION.md](PLANNER_VALIDATION.md) för resultat/begränsningar.
 
 Vyn lämnas igång på **http://127.0.0.1:8765/** för Bengts prov. Inga stora
@@ -37,7 +43,8 @@ GeoTools-filen kan vara låst vid första JVM-städningen; uppskjuten städning
 efter exit har fungerat. Felet döljs inte. Vid fortsatt utveckling, stoppa
 servern innan routingkod ändras och starta om så kodhashar och laddad JVM
 stämmer. Börja med 1–5 startminuter. Högst 120 minuter per nytt anrop.
-Nya vyanalyser: basgräns 120 min, gång 15 min totalt, reservhorisont 120 min
+Nya vyanalyser: basgräns 120 min, gång 4,5 km/h (3–6), högst 20 min totalt
+(10–30), reservhorisont 120 min
 efter besked. Sparade originalförval har fortfarande sina frysta 45 min.
 Trafikdygns-/DST-övergång och frekvensbaserade turinstanser är begränsningar.
 

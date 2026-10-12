@@ -50,15 +50,17 @@ def normalize(data):
     result.update(date=data['date'],start=grid[0].time().isoformat(),window_minutes=len(grid),timezone=data['timezone'])
     horizon=data.get('max_time_minutes',120)
     if isinstance(horizon,bool) or not isinstance(horizon,int):raise ValueError('Journey horizon must be integer minutes')
-    params=routing_parameters(data.get('max_rides',2),horizon*60)
-    result.update(max_rides=params['max_rides'],max_time_minutes=horizon)
+    walk_minutes=data.get('max_walk_minutes',20)
+    if isinstance(walk_minutes,bool) or not isinstance(walk_minutes,int):raise ValueError('Walking budget must be integer minutes')
+    params=routing_parameters(data.get('max_rides',2),horizon*60,data.get('walk_speed_kmh',4.5),walk_minutes*60)
+    result.update(max_rides=params['max_rides'],max_time_minutes=horizon,walk_speed_kmh=params['walk_speed_kmh'],max_walk_minutes=walk_minutes)
     if len(grid)>120:raise ValueError('Local planner allows at most 120 start minutes per request')
     return result
 
 
 def request_from_report(report):
     meta=report['metadata']; p=meta['parameters']; first=meta['start_minutes'][0]
-    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'],max_rides=p['max_rides'],max_time_minutes=p['max_time_seconds']//60)
+    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'],max_rides=p['max_rides'],max_time_minutes=p['max_time_seconds']//60,walk_speed_kmh=p['walk_speed_kmh'],max_walk_minutes=p['max_walk_seconds']//60)
     for prefix,key in [('from','origin'),('to','destination')]:
         result.update({prefix+'_'+k:p[key][k] for k in ('lat','lon','name')})
     return normalize(result)
@@ -84,9 +86,10 @@ class Review:
         self.legacy_nminus=json.loads((ROOT/'scripts/legacy_regressions.json').read_text(encoding='utf-8'))['nminus_checksums']
         self.reports={};self.files={};self.presets=[];self.jobs={};self.pool=ThreadPoolExecutor(max_workers=2)
         self.lock=threading.Lock();self.analysis_lock=threading.Lock();self.process=None;self.log=None
+        self.job_context=threading.local();self.active_job=None
         self.output=ROOT/'outputs/review';self.output.mkdir(parents=True,exist_ok=True)
-        self.engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('review_detail_worker.py','detailed_routes.py','r5_adapter.py','nminus_core.py','nminus_engine.py')})
-        self.nminus_engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_engine.py','nminus_core.py','review_detail_worker.py','schedule_sweep.py','planner_core.py','nminus_validation.py','r5_adapter.py')})
+        self.engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('review_detail_worker.py','detailed_routes.py','r5_adapter.py','nminus_core.py','nminus_engine.py','walking_links.py')})
+        self.nminus_engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_engine.py','nminus_core.py','review_detail_worker.py','schedule_sweep.py','planner_core.py','nminus_validation.py','r5_adapter.py','walking_links.py')})
         for name in PRESETS:
             path=ROOT/'outputs'/f'phase2c_{name}_1.json'
             if not path.exists():
@@ -107,11 +110,12 @@ class Review:
     def verify(self,report):
         meta=report['metadata'];h=meta['input_hashes']
         if report['status']!='OK' or h['osm']!=self.hashes['osm'] or h['gtfs_original']!=self.hashes['gtfs']:raise ValueError('Analysis or inputs not verified')
-        if any(meta['parameters'].get(k)!=v for k,v in routing_parameters(meta['parameters']['max_rides'],meta['parameters']['max_time_seconds']).items()):raise ValueError('Routing parameters differ')
+        p=meta['parameters']
+        if any(p.get(k)!=v for k,v in routing_parameters(p['max_rides'],p['max_time_seconds'],p['walk_speed_kmh'],p['max_walk_seconds']).items()):raise ValueError('Routing parameters differ')
         if meta['versions']['r5py']!='1.1.7':raise ValueError('Unverified engine version')
         identity=digest(dict(metadata=meta,metrics=report['metrics'],minutes=report['minute_observations']))
         if identity in self.legacy.values():return
-        for name in ('detailed_routes.py','r5_adapter.py','schedule_sweep.py','analysis_contract.py','t90_core.py','planner_core.py','nminus_core.py','nminus_engine.py'):
+        for name in ('detailed_routes.py','r5_adapter.py','schedule_sweep.py','analysis_contract.py','t90_core.py','planner_core.py','nminus_core.py','nminus_engine.py','walking_links.py'):
             if fingerprint(ROOT/'scripts'/name)!=h['code'][name]:raise ValueError('Saved analysis engine differs; regenerate analysis')
 
     def register(self,report,path):
@@ -123,7 +127,9 @@ class Review:
         import uuid
         identity=uuid.uuid4().hex;self.jobs[identity]=dict(status='LOADING')
         def run():
-            try:self.jobs[identity]=dict(status='DONE',result=work())
+            try:
+                self.job_context.identity=identity
+                self.jobs[identity]=dict(status='DONE',result=work())
             except Exception as error:
                 # No raw subprocess stderr or data paths cross the browser boundary.
                 self.jobs[identity]=dict(status='ERROR',message='Körningen misslyckades ('+type(error).__name__+'). Se outputs/review.')
@@ -145,8 +151,8 @@ class Review:
         if supported['status']!='OK':return supported
         for identity,report in list(self.reports.items()):
             if request_from_report(report)==req:return dict(status='OK',analysis_id=identity,report=report)
-        engine={name:fingerprint(ROOT/'scripts'/name) for name in ('analyze_t90.py','planner_core.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','t90_core.py','analysis_contract.py','review_detail_worker.py','nminus_core.py','nminus_engine.py')}
-        key=digest(dict(request=req,hashes=self.hashes,parameters=routing_parameters(req['max_rides'],req['max_time_minutes']*60),engine=engine))
+        engine={name:fingerprint(ROOT/'scripts'/name) for name in ('analyze_t90.py','planner_core.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','t90_core.py','analysis_contract.py','review_detail_worker.py','nminus_core.py','nminus_engine.py','walking_links.py')}
+        key=digest(dict(request=req,hashes=self.hashes,parameters=routing_parameters(req['max_rides'],req['max_time_minutes']*60,req['walk_speed_kmh'],req['max_walk_minutes']*60),engine=engine))
         path=self.output/f'analysis-{key}.json'
         request_file=self.output/f'request-{key}.json'
         atomic_json(request_file,req);self.files[key]=request_file
@@ -233,9 +239,12 @@ class Review:
                             for line in process.stdout:
                                 log.write(line);log.flush()
                                 if line.startswith('REVIEW_RESULT '):responses.put(line.rstrip())
+                                if line.startswith('REVIEW_PROGRESS ') and self.active_job in self.jobs:
+                                    self.jobs[self.active_job].update(json.loads(line[len('REVIEW_PROGRESS '):]))
                         responses.put(None)
                     self.reader=threading.Thread(target=read_stdout,args=(self.process,self.responses),daemon=True)
                     self.reader.start()
+                self.active_job=getattr(getattr(self,'job_context',None),'identity',None)
                 self.process.stdin.write(json.dumps(dict(command=command,report=str(self.files[identity]),analysis_id=identity,index=index,output=str(path)))+'\n');self.process.stdin.flush()
                 try:
                     response=self.responses.get(timeout=600)
@@ -278,7 +287,7 @@ def handler(review):
             if not self.trusted():self.send(dict(message='Endast lokal åtkomst'),403);return
             path=urlparse(self.path).path
             if path=='/api/presets':
-                value=dict(presets=review.presets,parameters=routing_parameters(2,7200))
+                value=dict(presets=review.presets,parameters=routing_parameters(2,7200,4.5,1200))
                 if hasattr(review,'coverage'):
                     value.update(coverage=dict(first=review.coverage['first'],last=review.coverage['last']),area=review.area,max_window_minutes=120)
                 self.send(value);return

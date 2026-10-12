@@ -1,5 +1,53 @@
 # Verifiering av lokal planerare, 2026-10-12
 
+## Gångparametrar och exakt profil, senare uppdatering
+
+Nya standardvärden 4,5 km/h och högst 20 minuter gång används genom hela
+bas-/detalj-/N−1-kedjan. Intervall 3–6 km/h och 10–30 minuter valideras i
+API och vy. Inställningarna ingår i metadata och cacheidentitet; cache för
+bytesgång skiljer också hastighet och budget. R5:s byteslänkar längre än
+1 km kompletteras till 3 km en gång, vilket täcker övre gånginställningen.
+Originalens länkar/regler och parametrar behålls.
+
+Profilen jämfördes mot **alla 240 sparade minutobservationer**: användarens
+tidigare 60-minutersfall och de tre originalrelationerna (180 minuter).
+Restid, gång, väntan, byten och exakt vald tur-/hållplatskedja är identiska.
+Originalrelationernas 180 minuter jämfördes dessutom med aktuell separat
+sweep och rå R5: samtliga passerar; regression-worker avslutade med exit 0.
+
+| Samma frysta indata/parametrar | Minuter | Profilsökningar | Profilens söktid | Tidigare separat sweep |
+| --- | ---: | ---: | ---: | ---: |
+| Tidigare lokalt Bjärredfall, fyra ben | 60 | 8 | 29,86 s | 350,47 s |
+| Lomma → Lund, original | 60 | 8 | 0,010 s | 0,079 s |
+| Malmö C → Värnhem, original | 60 | 13 | 0,246 s | 1,243 s |
+| Gunnesbo → Ideontorget, original | 60 | 10 | 0,028 s | 0,196 s |
+
+Tider avser själva oberoende sökningen, inte import, nätverksladdning, rå
+R5 och detaljer. Mätningarna gjordes vid olika körningar och är inte ett
+kontrollerat laboratoriebenchmark. Bjärredfallet förbättrades cirka 11,7 gånger
+för sökningen med oförändrade resultat; hela anropet har kvar andra kostnader.
+
+Ett nytt 120-minutersfönster 06:30–08:29:59, 2026-10-14, till verifierad
+OSM-entré med fyra ben och nya gångstandardvärden granskades i webbläsaren:
+17 profilsökningar, 33 råa R5-kontrollminuter, alla kontrolltider identiska,
+120/120 nåbara. T50 47:50, T90 51:44, T99 53:50; buffer_90 3:54;
+minimum 38:07. Profilens söktid 38,68 s; första UI-anropet tog 131,3 s
+inklusive nätverksstart, länkutökning, kontroller och geometri.
+Vyn visar framsteg i dessa beräkningsfaser och återanvänder sedan cache.
+Exakta privata koordinater och genererade användarresultat publiceras inte.
+
+Ett separat enminuts-N−1-prov med nya parametrar passerade sweep/R5 och
+kontraktsvalidering för båda trafikbenen. Bortfall av första benet gav
+59:28 (extra 10:38), andra benet 55:09 (extra 6:19). Genomförd gång och
+förbrukat trafikben bevarades; kvarvarande budget var 17:24 respektive
+15:06. Nätverket återanvändes och efterföljande basfall var oförändrat.
+N−1 är fortsatt betydligt dyrare än basprofilen och har inte benchmarkats
+över 120 minuter i denna uppdatering.
+
+84 tester passerar. Profiltester omfattar slumpade nät och direktgång som
+först vinner, sedan slås av transit och åter vinner efter missad avgång.
+Se [SCHEDULE_PROFILE.md](SCHEDULE_PROFILE.md) för exakt metod och fullvalidering.
+
 ## Korrigering av basresans sökhorisont
 
 Nya vyanalyser använder 120 minuter i stället för 45. Parametern följer

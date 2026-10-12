@@ -54,7 +54,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                     inner=jpype.JClass('gnu.trove.map.hash.TIntIntHashMap')()
                     for stop,leg in legs.items():
                         seconds=round(leg.travel_time.total_seconds())
-                        if seconds<=900:inner.put(int(stop),seconds)
+                        if seconds<=parameters['max_walk_seconds']:inner.put(int(stop),seconds)
                     outer.put(jpype.JClass('com.conveyal.r5.api.util.LegMode').valueOf(mode.name),inner)
                 return outer
             router=jpype.JClass('com.conveyal.r5.profile.McRaptorSuboptimalPathProfileRouter')
@@ -71,7 +71,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             for trip in planner.direct_paths:
                 leg=trip.legs[0]
                 seconds=round(leg.travel_time.total_seconds())
-                if seconds<=900:
+                if seconds<=parameters['max_walk_seconds']:
                     options.append([segment('WALK',ready,seconds,0,leg.geometry)])
             states=engine.finalStatesByDepartureTime.get(ready)
             for state in states if states is not None else []:
@@ -117,9 +117,9 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             return pd.DataFrame(rows,columns=self.COLUMNS+['trip_id','fixed_slack_seconds'])
 
     result=ExactDetailed(network,frame(origin),frame(destination),departure=feed_instant,
-           departure_time_window=timedelta(minutes=5),speed_walking=3.6,
+           departure_time_window=timedelta(minutes=5),speed_walking=parameters['walk_speed_kmh'],
            transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-           max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),max_public_transport_rides=parameters['max_rides'])
+           max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(seconds=parameters['max_walk_seconds']),max_public_transport_rides=parameters['max_rides'])
     result=result.to_crs('EPSG:4326')
     families={};invalid=0
     for _,group in result.groupby('option'):
@@ -151,7 +151,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                 geometry_connectors_m=connectors))
         total=(datetime.fromisoformat(legs[-1]['arrival'])-datetime.fromisoformat(observation['start'])).total_seconds()
         walking=sum(l['walking_seconds'] for l in legs)
-        if not 0<=total<=parameters['max_time_seconds'] or walking>900 or any(l['wait_seconds']<0 for l in legs):invalid+=1;continue
+        if not 0<=total<=parameters['max_time_seconds'] or walking>parameters['max_walk_seconds'] or any(l['wait_seconds']<0 for l in legs):invalid+=1;continue
         rides=[dict(mode=l['mode'],route_id=l['route_id'],line=l['line'],start_stop=l['start_stop'],end_stop=l['end_stop']) for l in legs if l['mode']!='WALK']
         f=family(rides)
         item=dict(route_family=f, duration_seconds=total,walking_seconds=walking,
@@ -170,6 +170,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
         stops=[dict(stop_id=stop,stop_name=stop_names[stop],stop_lon=coords[0],stop_lat=coords[1]) for stop,coords in stop_coordinates.items()]
         _GEOMETRY_ADAPTERS[java_network]=NMinusEngine(network,None,stops,{})
     geometry_adapter=_GEOMETRY_ADAPTERS[java_network]
+    geometry_adapter.parameters=parameters
     geometry_adapter.midnight=midnight
     geometry_adapter.display_zone=datetime.fromisoformat(observation['start']).tzinfo
     planner=planners[0]

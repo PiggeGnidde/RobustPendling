@@ -13,14 +13,17 @@ lon 12.95–13.30, lat 55.60–55.80. Datatäckning garanterar inte en nåbar re
 
 ## Parametrar och flerbensrouting
 
-Gång 3,6 km/h, högst 900 s sammanlagd gång. Nya analyser från vyn söker
+Nya analyser använder 4,5 km/h (valbart 3–6) och högst 20 minuters
+sammanlagd gång (valbart 10–30). Gångbudgeten omfattar start, byte och mål.
+Originalförvalen behåller 3,6 km/h och 15 minuter. Nya analyser från vyn söker
 basresor upp till 7200 s (120 minuter). Den tidigare 45-minutersgränsen
 kunde utesluta realistiska pendlingsresor. ”Ej nåbar” avser alltid analysens
 gränser, inte att det saknas en resa med längre gång eller restid.
 De sparade Phase 2C-förvalen behåller sina ursprungliga 2700 s och resultat.
 CLI använder fortfarande 45 minuter som historiskt default; ange
-`--max-time-minutes 120 --planner` för samma horisont som nya vyanalyser.
-API-fältet `max_time_minutes` ingår i cacheidentiteten och metadata.
+`--max-time-minutes 120 --walk-speed-kmh 4.5 --max-walk-minutes 20 --planner`
+för samma parametrar som nya vyanalyser. API-fälten `max_time_minutes`,
+`walk_speed_kmh` och `max_walk_minutes` ingår i cacheidentiteten och metadata.
 `max_rides` är ett heltal 1–4 (default 2). Boarding kräver strikt avgång
 efter aktuell ankomst + gång + 60 s; slutmarginal efter trafik är 60 s.
 Pickup/dropoff 0 och 3 tillåts; 1 och 2 avvisas före R5-dominanspruning.
@@ -33,6 +36,13 @@ bort prefix som inte kan avslutas inom tidsgränsen; de bortser från förbrukad
 gång och redan använda turer och kan därför inte avvisa en giltig fortsättning.
 Sista rundan söker bara trafik till möjliga slutgångshållplatser. Tester
 jämför även med en separat sökning utan pruning.
+
+Vyn använder en exakt profil: den optimala reskedjan återanvänds för senare
+startminuter tills första avgången inte längre går att nå. Alla minutresultat
+och kvantiler finns kvar. Rå R5 kontrollerar profilens sökminuter och gränser;
+`--validate-every-minute` aktiverar separat sweep/R5 för samtliga minuter.
+Se [SCHEDULE_PROFILE.md](SCHEDULE_PROFILE.md) för bevis, begränsningar och
+gånglänkarnas utökning. Vyn visar framsteg för profil, R5-kontroll och detaljer.
 Detaljkartan visar alltid den exakt valda basresans turinstanser med R5:s
 geometri, även när R5:s dominanslista behåller en annan lika snabb kedja.
 

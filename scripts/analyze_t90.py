@@ -21,6 +21,7 @@ from smoke_helpers import gtfs_tables, select_station, routing_feed
 from t90_core import PARAMETERS, minute_grid, statistics, metadata, combinations, component_statistics
 from schedule_sweep import ScheduleSweep, load_trips
 from planner_core import routing_parameters,service_coverage,date_check
+from walking_links import ensure_walking_links
 from analysis_contract import (SCHEMA_VERSION,point,request_grid,area_check,family,
                                structural_metrics,representatives,validate_geojson,
                                positive_jumps,audited_representatives)
@@ -43,6 +44,9 @@ def parser():
     p.add_argument('--output', type=Path, default=ROOT/'outputs/t90_schedule_lomma_lund.json')
     p.add_argument('--max-rides',type=int,choices=range(1,5),default=2)
     p.add_argument('--max-time-minutes',type=int,default=45,help='Journey horizon; local planner uses 120, historical CLI regression uses 45')
+    p.add_argument('--walk-speed-kmh',type=float,default=3.6)
+    p.add_argument('--max-walk-minutes',type=int,default=15)
+    p.add_argument('--validate-every-minute',action='store_true',help='Validate profile against independent per-minute sweep and raw R5')
     p.add_argument('--planner',action='store_true',help='Skip redundant native/matrix diagnostics; exact R5 comparison remains')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--artifact-prefix',help=argparse.SUPPRESS)
@@ -56,8 +60,8 @@ def empty_response(status,message,meta=None,area=None):
 
 
 def worker(args, grid, reused_network=None):
-    parameters=routing_parameters(args.max_rides,args.max_time_minutes*60)
-    source_names=('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py','planner_core.py','nminus_core.py','nminus_engine.py')
+    parameters=routing_parameters(args.max_rides,args.max_time_minutes*60,args.walk_speed_kmh,args.max_walk_minutes*60)
+    source_names=('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py','planner_core.py','nminus_core.py','nminus_engine.py','walking_links.py')
     initial_code={name:fingerprint(ROOT/'scripts'/name) for name in source_names}
     inputs = paths(args.config)
     initial_hashes = dict(osm=fingerprint(inputs['osm']),gtfs=fingerprint(inputs['gtfs']))
@@ -119,11 +123,12 @@ def worker(args, grid, reused_network=None):
     derivation = routing_feed(inputs['gtfs'],derived)
     started = time.perf_counter()
     network = reused_network or r5py.TransportNetwork(inputs['osm'],[derived])
+    ensure_walking_links(network,parameters)
     build_seconds = time.perf_counter()-started
     request = RegionalTask(network, departure=grid[0], departure_time_window=timedelta(hours=1),
                           transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                          speed_walking=3.6, max_time=timedelta(seconds=parameters['max_time_seconds']),
-                          max_time_walking=timedelta(seconds=900), max_public_transport_rides=parameters['max_rides'])
+                          speed_walking=parameters['walk_speed_kmh'], max_time=timedelta(seconds=parameters['max_time_seconds']),
+                          max_time_walking=timedelta(seconds=parameters['max_walk_seconds']), max_public_transport_rides=parameters['max_rides'])
     task = request._regional_task
     task.fromLat,task.fromLon = origin['lat'],origin['lon']
     task.toLat,task.toLon = destination['lat'],destination['lon']
@@ -156,8 +161,18 @@ def worker(args, grid, reused_network=None):
     sweep = ScheduleSweep(trips,access,egress,transfers,parameters,direct_walk_seconds=direct_walk)
     started = time.perf_counter()
     observations = []
-    for instant, seconds in zip(requested_grid,start_seconds):
-        row = dict(start=instant.isoformat(),start_seconds=seconds,**sweep.at(seconds))
+    def progress(message):
+        print('REVIEW_PROGRESS '+json.dumps(dict(message=message)),flush=True)
+    if args.planner:
+        sweep_rows,profile_anchors=sweep.profile(start_seconds,lambda done,total,searches:progress(f'Tidtabellsprofil {done}/{total} startminuter · {searches} sökningar'))
+        if args.validate_every_minute:
+            for seconds,row in zip(start_seconds,sweep_rows):
+                if row!=sweep.at(seconds):raise RuntimeError('Profile differs from independent minute sweep')
+    else:
+        sweep_rows=[sweep.at(seconds) for seconds in start_seconds];profile_anchors=list(range(len(grid)))
+    check_indices=sorted(set(profile_anchors+[i-1 for i in profile_anchors if i>0]+[len(grid)-1])) if args.planner and not args.validate_every_minute else list(range(len(grid)))
+    for instant, seconds, result in zip(requested_grid,start_seconds,sweep_rows):
+        row = dict(start=instant.isoformat(),start_seconds=seconds,**result)
         if row['duration_seconds'] is not None:
             row['arrival'] = (midnight+timedelta(seconds=row['arrival_seconds'])).astimezone(instant.tzinfo).isoformat()
             row['status'] = 'REACHABLE'
@@ -206,10 +221,12 @@ def worker(args, grid, reused_network=None):
                     mode=str(info.route_type),start_stop=ids[int(previous.stop)],end_stop=ids[int(current.stop)],
                     departure_seconds=int(current.boardTime),arrival_seconds=int(current.time)))
         duration = int(state.time)-ready+parameters['egress_slack_seconds']
-        if not rides or walking_seconds>900 or duration>parameters['max_time_seconds']: return None
+        if not rides or walking_seconds>parameters['max_walk_seconds'] or duration>parameters['max_time_seconds']: return None
         return dict(duration_seconds=duration,walking_seconds=walking_seconds,rides=rides)
     comparisons = []
-    for row,seconds in zip(observations,start_seconds):
+    for checked,index in enumerate(check_indices):
+        if args.planner:progress(f'R5-kontroll {checked}/{len(check_indices)} kontrollminuter')
+        row=observations[index];seconds=start_seconds[index]
         req = copy.copy(request)._regional_task
         req.fromTime,req.toTime,req.monteCarloDraws = seconds-1,seconds+1,1
         engine = router(req)
@@ -226,9 +243,9 @@ def worker(args, grid, reused_network=None):
         finite = [c for c in choices if c is not None]
         best = min(finite,key=lambda c:c['duration_seconds']) if finite else None
         value = best['duration_seconds'] if best else None
-        if direct_walk is not None and direct_walk<=900:
+        if direct_walk is not None and direct_walk<=parameters['max_walk_seconds']:
             value=direct_walk if value is None else min(value,direct_walk)
-        comparisons.append(dict(start=row['start'],evaluated_seconds=keys,raw_r5_seconds=value,
+        comparisons.append(dict(index=index,start=row['start'],evaluated_seconds=keys,raw_r5_seconds=value,
                                 raw_best_rides=best['rides'] if best else [],
                                 explicit_seconds=row['duration_seconds'],equal=value==row['duration_seconds']))
     minute_matrices=[];matrix_warnings=set();matrix_comparison=None;native_keys=[];selected=[]
@@ -250,7 +267,7 @@ def worker(args, grid, reused_network=None):
         matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=grid[0],
                      departure_time_window=timedelta(minutes=len(grid)),percentiles=[50,90,99],
                      transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                     speed_walking=3.6,max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),
+                     speed_walking=parameters['walk_speed_kmh'],max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(seconds=parameters['max_walk_seconds']),
                      max_public_transport_rides=parameters['max_rides'])
         import pandas as pd
         matrix_comparison = json.loads(pd.DataFrame(matrix).to_json(orient='records'))
@@ -262,7 +279,7 @@ def worker(args, grid, reused_network=None):
                 minute_matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=instant,
                      departure_time_window=timedelta(minutes=1),percentiles=[50],
                      transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                     speed_walking=3.6,max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),
+                     speed_walking=parameters['walk_speed_kmh'],max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(seconds=parameters['max_walk_seconds']),
                      max_public_transport_rides=parameters['max_rides'])
                 matrix_warnings.update(str(w.message) for w in captured)
             result_minutes = json.loads(pd.DataFrame(minute_matrix).to_json(orient='records'))[0]['travel_time']
@@ -277,7 +294,8 @@ def worker(args, grid, reused_network=None):
                   allow_pure_walk=True,geometry_crs='EPSG:4326',
                   audit_jumps=args.audit_jumps,
                   r5_permission_adapter='filter_before_dominance_pruning',
-                  sweep='independent_bounded_1_to_4_rides_on_R5_walking_links',
+                  sweep='exact_first_boarding_profile' if args.planner else 'independent_bounded_1_to_4_rides_on_R5_walking_links',
+                  r5_validation='all_minutes' if len(check_indices)==len(grid) else 'profile_anchors_and_boundaries',
                   exact_r5_adapter_seed=seed, exact_r5_interval_seconds=2)
     frozen['native_diagnostic_draws'] = int(native.monteCarloDraws)
     hashes = dict(osm=fingerprint(inputs['osm']),gtfs_original=fingerprint(inputs['gtfs']),
@@ -294,6 +312,7 @@ def worker(args, grid, reused_network=None):
             f=family(row['rides']);registry.setdefault(f['id'],dict(**f,selected_count=0))['selected_count']+=1
     jumps=positive_jumps(observations,args.audit_jumps)
     for role in audited_representatives(observations,jumps):
+        if args.planner:progress(f'Detaljresor · {calls} klara')
         index=role['index'];row=observations[index]
         if row['duration_seconds'] is None:
             representative_itineraries.append(dict(**role,best_duration_seconds=None,best_r5_option=None,options=[],matches_sweep=None));continue
@@ -335,6 +354,9 @@ def worker(args, grid, reused_network=None):
                   observations=observations,combinations=combinations(observations),
                   components=component_statistics(observations),
                   verification=dict(exact_minute_comparisons=comparisons,
+                          profile_anchor_indices=profile_anchors,raw_r5_checked_indices=check_indices,
+                          profile_search_count=len(profile_anchors),minute_count=len(grid),
+                          explicit_profile_minute_validation=args.validate_every_minute,
                     network_build_count=1,detailed_itineraries_calls=calls,
                     representative_match_count=sum(r['matches_sweep'] is True for r in representative_itineraries),
                     equal_count=sum(c['equal'] for c in comparisons),
@@ -380,8 +402,10 @@ def main():
                    '--date',args.date,'--start',args.start,'--window-minutes',str(len(grid)),'--timezone',args.timezone,
                    '--output',str(work_result),'--artifact-prefix',args.output.stem]
         command.extend(['--audit-jumps',str(args.audit_jumps),'--max-rides',str(args.max_rides),
-                        '--max-time-minutes',str(args.max_time_minutes)])
+                        '--max-time-minutes',str(args.max_time_minutes),'--walk-speed-kmh',str(args.walk_speed_kmh),
+                        '--max-walk-minutes',str(args.max_walk_minutes)])
         if args.planner:command.append('--planner')
+        if args.validate_every_minute:command.append('--validate-every-minute')
         for endpoint in ('from','to'):
             for field in ('lat','lon','name'):
                 value=getattr(args,f'{endpoint}_{field}')

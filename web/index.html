@@ -18,6 +18,8 @@
   <label>Datum<input name="date" type="date" required></label><label>Starttid<input name="start" type="time" required></label>
   <label>Avreseintervall, minuter<input name="window_minutes" type="number" min="1" max="120" value="5" required></label><label>Tidszon<input name="timezone" required></label>
   <label>Högst trafikben<select name="max_rides"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+  <label>Gånghastighet, km/h<input name="walk_speed_kmh" type="number" min="3" max="6" step="0.1" value="4.5" required></label>
+  <label>Högst gång totalt, minuter<input name="max_walk_minutes" type="number" min="10" max="30" step="1" value="20" required></label>
   <label>Analysläge<select name="analysis_mode"><option value="departure">Avreseintervall</option><option value="deadline">Framme senast</option></select></label>
   <label id="deadline-label" hidden>Framme senast (vald tidszon)<input name="deadline" type="time" value="08:00"></label>
   <button type="submit" class="primary">Analysera</button>
@@ -26,7 +28,7 @@
 <div id="pick-map" hidden aria-label="Klicka för att välja start eller mål"></div><p id="pick-status" role="status"></p>
 <p id="status" role="status" aria-live="polite">Läser förval…</p></section>
 <section id="results" hidden>
-  <div class="notice"><strong>Enligt tidtabell – förseningar ingår inte.</strong><span>Varje analyserad startminut har lika vikt i baskvantilerna. Variation över starttider är inte sannolikheten att komma fram i tid.</span></div>
+  <div class="notice"><strong>Enligt tidtabell – förseningar ingår inte.</strong><span>Varje analyserad startminut har lika vikt i baskvantilerna. T90−T50 visar hur känslig pendlingstiden är för när du lämnar hemmet inom det valda fönstret. En liten skillnad betyder mindre variation i detta fönster; kontrollera också total restid och täckning. Variation över starttider är inte sannolikheten att komma fram i tid.</span></div>
   <h2 id="relation"></h2><div id="metrics" class="metrics"></div>
   <section id="deadline-results" class="panel" hidden><h2>Framme senast – tidtabellsbaserade villkor</h2><p id="deadline-status" role="status"></p><div id="deadline-choices" class="row"></div><p>Varje startminut i det explicita avreseintervallet bedöms. Ingen monoton ankomsttid antas och ingen sannolikhet i verklig trafik uppskattas.</p></section>
   <section class="panel"><div class="row"><label>Scenario<select id="scenario"><option value="base">Basfall</option><option value="1">Ben 1 uteblir</option><option value="2">Ben 2 uteblir</option></select></label><span id="nminus-status" role="status" aria-live="polite"></span></div>
@@ -45,5 +47,5 @@
   </div>
   <section class="panel"><h2>Valda linjekombinationer i basfallet</h2><p>Andelar bland startminuternas valda optimala resor. Detta är inte en fullständig inventering av reservvägar.</p><div id="combinations"></div></section>
 </section>
-<footer>Lokal tidtabellsplanerare · nya basanalyser högst 120 min · gång högst 15 min totalt · reserver högst 120 min efter besked · högst 1–4 trafikben. Ej nåbar betyder ingen resa inom analysens gränser.</footer>
+<footer>Lokal tidtabellsplanerare · nya basanalyser högst 120 min · gång normalt 4,5 km/h och högst 20 min totalt (valbart 3–6 km/h / 10–30 min) · reserver högst 120 min efter besked · högst 1–4 trafikben. Ej nåbar betyder ingen resa inom analysens gränser.</footer>
 </main></body></html>

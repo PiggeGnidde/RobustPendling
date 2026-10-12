@@ -13,6 +13,9 @@ Deterministisk N−1-analys av uteblivna turer beskrivs i
 [Små JSON-exempel](examples/README.md) visar sparade resultat utan rådata eller cache.
 Vyn är också en [lokal A–B-planerare](docs/PLANNER.md) med kartval, 1–4
 trafikben, samlat N−1 och tidtabellsbaserad ankomstdeadline.
+Nya analyser använder 4,5 km/h och högst 20 minuters sammanlagd gång,
+valbart 3–6 km/h och 10–30 minuter. [Exakt profilåteranvändning](docs/SCHEDULE_PROFILE.md)
+gör avresefönster på 60–120 minuter snabbare utan att ändra minutresultaten.
 
 ## Miljökontroll
 

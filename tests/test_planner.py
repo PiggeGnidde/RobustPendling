@@ -6,6 +6,8 @@ import tempfile
 import unittest
 import zipfile
 import random
+from types import SimpleNamespace
+from unittest.mock import Mock
 from planner_core import routing_parameters,combined_nminus,deadline_result,service_coverage,date_check
 from schedule_sweep import ScheduleSweep
 from nminus_core import remaining_resources
@@ -13,9 +15,72 @@ from nminus_core import summarize
 from nminus_validation import validate_result
 from test_nminus_validation import fixture
 from test_t90 import trip
+from walking_links import merge_pairs
+from nminus_engine import NMinusEngine
 
 
 class PlannerTests(unittest.TestCase):
+    def test_transfer_cache_is_separate_for_speed_and_whole_walk_budget(self):
+        pairs=Mock();values=[1,800000,2,1100000]
+        pairs.size.return_value=len(values);pairs.get.side_effect=lambda index:values[index]
+        engine=NMinusEngine.__new__(NMinusEngine)
+        engine.layer=SimpleNamespace(streetTransfers=Mock());engine.layer.streetTransfers.get.return_value=pairs
+        engine.indices={'a':0};engine.ids={1:'b',2:'c'};engine.transfers_cache={}
+        engine.parameters=routing_parameters(2,7200,3.6,900)
+        self.assertEqual(engine.transfers('a'),{'a':0,'b':800})
+        engine.parameters=routing_parameters(2,7200,4.5,1200)
+        self.assertEqual(engine.transfers('a'),{'a':0,'b':640,'c':880})
+        engine.parameters=routing_parameters(2,7200,3.6,900)
+        self.assertEqual(engine.transfers('a'),{'a':0,'b':800})
+        self.assertEqual(len(engine.transfers_cache),2)
+
+    def test_extended_walk_links_preserve_existing_rules_and_budgets(self):
+        original=[(1,250000),(2,1200000)]
+        merged=merge_pairs(original,{1:100000,2:1100000,3:1000000,4:1000001,5:3000000})
+        self.assertEqual(merged,[(1,250000),(2,1200000),(4,1000001),(5,3000000)])
+        self.assertEqual(dict(merged)[1],250000) # existing GTFS/R5 rule is preserved
+        p=routing_parameters(4,7200,4.5,1200)
+        self.assertEqual(remaining_resources(300,2,p)['max_walk_seconds'],900)
+        self.assertEqual(remaining_resources(300,2,p)['walk_speed_kmh'],4.5)
+        for speed in (3,4.5,6):
+            for budget in (600,1200,1800):
+                self.assertEqual(routing_parameters(2,7200,speed,budget)['max_walk_seconds'],budget)
+    def test_profile_matches_every_minute_at_first_boarding_boundaries(self):
+        trips=[trip('early',[('a',600),('b',1000)]),trip('later_faster',[('a',1000),('b',1100)])]
+        starts=list(range(0,1200,60))
+        for rides in (1,2,3,4):
+            s=ScheduleSweep(trips,{'a':120},{'b':30},lambda stop:{stop:0},routing_parameters(rides,7200))
+            rows,anchors=s.profile(starts)
+            self.assertEqual(rows,[s.at(t) for t in starts])
+            self.assertEqual(anchors[:2],[0,7]) # first dep 600: latest start 419
+            self.assertLess(len(anchors),len(starts))
+            rows[0]['rides'][0]['line']='changed'
+            self.assertNotEqual(rows[1]['rides'][0]['line'],'changed')
+
+    def test_profile_direct_walk_can_be_overtaken_and_win_after_missed_bus(self):
+        s=ScheduleSweep([trip('bus',[('a',600),('b',700)])],{'a':120},{'b':10},lambda stop:{stop:0},routing_parameters(2),direct_walk_seconds=600)
+        starts=list(range(0,720,60));rows,_=s.profile(starts)
+        self.assertEqual(rows,[s.at(t) for t in starts])
+        self.assertEqual(rows[0]['rides'],[])
+        self.assertEqual(rows[3]['rides'][0]['trip_id'],'bus')
+        self.assertEqual(rows[7]['rides'],[]) # start 420 misses strict boarding
+
+    def test_profile_random_graphs_walking_ties_horizon_and_unreachable(self):
+        for seed in range(25):
+            rng=random.Random(seed);trips=[]
+            for n in range(18):
+                a,b=rng.sample(list('abcde'),2);dep=rng.randrange(80,1800)
+                t=trip(str(n),[(a,dep),(b,dep+rng.randrange(10,240))])
+                if rng.random()<.15:t['stops'][-1]['dropoff']='1'
+                trips.append(t)
+            for rides in (1,2,3,4):
+                p=dict(routing_parameters(rides),max_time_seconds=rng.choice((240,600,2700)))
+                s=ScheduleSweep(trips,{'a':10,'b':20},{'d':20,'e':10},lambda stop:{stop:0},p,direct_walk_seconds=rng.choice((None,180,300)))
+                starts=list(range(0,1500,60));rows,_=s.profile(starts)
+                self.assertEqual(rows,[s.at(t) for t in starts],(seed,rides))
+                self.assertEqual(s.p,p)
+        with self.assertRaises(ValueError):s.profile([60,0])
+
     def test_two_hour_horizon_includes_long_journeys_with_original_walk_budget(self):
         trips=[trip('long', [('a',120),('b',3000)])]
         for rides in (1,2,3,4):

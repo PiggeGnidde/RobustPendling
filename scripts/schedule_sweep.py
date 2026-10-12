@@ -56,6 +56,45 @@ def load_trips(feed, day, earliest, latest):
 
 
 class ScheduleSweep:
+    def profile(self, starts, progress=None):
+        """Exact forward profile: reuse optimum until its first boarding expires.
+
+        Later starts only remove catchable departures. Newly horizon-feasible
+        journeys arrive after the current optimum, so cannot improve it.
+        Pure walk is evaluated separately because its arrival shifts with start.
+        Unreachable transit minutes are searched individually (finite horizon).
+        """
+        if any(a>=b for a,b in zip(starts,starts[1:])):raise ValueError('Starts must increase strictly')
+        import copy
+        direct=self.direct_walk_seconds;cached=None;latest=-1;rows=[];anchors=[]
+        access={trip['stops'][board]['id']:walk for dep,trip,board,walk in self.first}
+        def key(row):
+            return (row['duration_seconds'],row['walking_seconds'],tuple((r['trip_id'],r['start_stop'],r['end_stop']) for r in row['rides']))
+        for index,start in enumerate(starts):
+            if progress:progress(index,len(starts),len(anchors))
+            if cached is None or start>latest:
+                self.direct_walk_seconds=None
+                original=self.p
+                if direct is not None and 0<=direct<=min(self.p['max_walk_seconds'],self.p['max_time_seconds']):
+                    self.p=dict(self.p,max_time_seconds=direct)
+                try:cached=self.at(start)
+                finally:self.direct_walk_seconds=direct;self.p=original
+                anchors.append(index)
+                if cached['duration_seconds'] is not None:
+                    first=cached['rides'][0]
+                    latest=first['departure_seconds']-access[first['start_stop']]-self.p['board_slack_seconds']-1
+                else:latest=start
+            row=copy.deepcopy(cached)
+            if row['duration_seconds'] is not None:
+                row['duration_seconds']=row['arrival_seconds']-start
+                row['waiting_seconds']=row['duration_seconds']-row['walking_seconds']-row['fixed_slack_seconds']-sum(r['arrival_seconds']-r['departure_seconds'] for r in row['rides'])
+            if direct is not None and 0<=direct<=min(self.p['max_walk_seconds'],self.p['max_time_seconds']):
+                walk=dict(duration_seconds=direct,walking_seconds=direct,waiting_seconds=0,fixed_slack_seconds=0,transfers=0,arrival_seconds=start+direct,rides=[])
+                if row['duration_seconds'] is None or key(walk)<key(row):row=walk
+            rows.append(row)
+        if progress:progress(len(starts),len(starts),len(anchors))
+        return rows,anchors
+
     def __init__(self, trips, access, egress, transfers, parameters=None, direct_walk_seconds=None):
         self.p = parameters or PARAMETERS
         self.direct_walk_seconds = direct_walk_seconds

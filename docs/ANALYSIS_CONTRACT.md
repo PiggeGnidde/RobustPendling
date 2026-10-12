@@ -73,7 +73,9 @@ eller nya percentilregler har lagts till.
 
 Ovanstående 2700 s och två ben avser de historiska Phase 2B/2C-förvalen.
 Den lokala planeraren använder nu **7200 s (120 minuter)** för nya
-basanalyser och 1–4 valda trafikben. API-parametern `max_time_minutes`
+basanalyser och 1–4 valda trafikben. Gångstandard är 4,5 km/h, högst 20 min
+totalt; valbara intervall är 3–6 km/h och 10–30 min. API-parametrarna
+`walk_speed_kmh`, `max_walk_minutes` och `max_time_minutes`
 och resultatets `metadata.parameters.max_time_seconds` anger horisonten;
 den följer med genom routing, detaljresor, validering och cacheidentitet.
 Ett resultat `UNREACHABLE` avser bara dessa dokumenterade analysgränser.
@@ -154,8 +156,13 @@ klockspann, komponenter och strikt möjliga boardings inklusive bytesgång.
 tillåtet för likvärdigt alternativ. R5:s suboptimalMinutes=5 begränsar
 alternativsökningen: den är **inte** en uttömmande lista över alla resvägar,
 och alternativa family-andelar över hela timmen uppskattas inte från fyra minuter.
-Råa R5-tillstånd och enminutsmatriser verifieras fortfarande för varje
-startminut, utan 60 fullständiga itinerary-/geometrianalyser.
+Den historiska CLI-valideringen kontrollerar rå R5 för varje startminut.
+Interaktiv analys använder nu exakt profilåteranvändning och kontrollerar
+profilens sökminuter, gränserna före nästa sökning och sista minuten mot rå R5.
+`verification.raw_r5_checked_indices` anger exakt vilka minuter som kontrollerats.
+`--validate-every-minute` jämför dessutom profil mot separat sweep och rå R5
+för varje minut. Se [SCHEDULE_PROFILE.md](SCHEDULE_PROFILE.md). Fullständiga
+itinerary-/geometrianalyser görs fortsatt bara för representativa minuter.
 
 GeoJSON är en FeatureCollection i EPSG:4326, med LineString eller
 MultiLineString per segment. Transitgeometri kommer från R5:s

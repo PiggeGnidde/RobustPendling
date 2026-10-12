@@ -15,7 +15,7 @@ from schedule_sweep import load_trips
 
 def main():
     config=Path(sys.argv[1]); inputs=paths(config)
-    source_names=('analyze_t90.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','planner_core.py','nminus_core.py','nminus_engine.py','nminus_validation.py','t90_core.py','analysis_contract.py')
+    source_names=('analyze_t90.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','planner_core.py','nminus_core.py','nminus_engine.py','nminus_validation.py','t90_core.py','analysis_contract.py','walking_links.py')
     loaded_sources={name:fingerprint(ROOT/'scripts'/name) for name in source_names}
     hashes={k:fingerprint(inputs[k]) for k in ('osm','gtfs')}
     for key,value in {'JAVA_HOME':str(Path(sys.prefix)/'Library/lib/jvm'),

@@ -13,10 +13,12 @@ async function api(path,data){
   const response=await fetch(path,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
   const value=await response.json();if(!response.ok)throw new Error(value.message||'Anropsfel');return value;
 }
-async function resolveJob(value,valid){
+async function resolveJob(value,valid,onProgress){
   while(value.job_id){
     await new Promise(resolve=>setTimeout(resolve,500));if(!valid())return null;
     const job=await api('/api/jobs/'+value.job_id);
+    if(!valid())return null;
+    if(job.message&&onProgress)onProgress(job.message);
     if(job.status==='ERROR')throw new Error(job.message);if(job.status==='DONE')return job.result;
   }return value;
 }
@@ -25,7 +27,7 @@ function invalidate(){
   generation++;clearTrip();analysis=null;analysisId=null;nminus=null;nminusPending=null;
   $('scenario').value='base';$('results').hidden=true;
   $('deadline-results').hidden=true;$('deadline-choices').replaceChildren();
-  $('parameters').textContent=`Gång 3.6 km/h · högst 15 min gång totalt · ny basanalys högst 120 min · högst ${form.elements.max_rides.value} trafikben · boarding >60 s · reservhorisont 120 min efter besked`;
+  $('parameters').textContent=`Gång ${form.elements.walk_speed_kmh.value} km/h · högst ${form.elements.max_walk_minutes.value} min gång totalt · ny basanalys högst 120 min · högst ${form.elements.max_rides.value} trafikben · boarding >60 s · reservhorisont 120 min efter besked`;
   syncPicker();
   status('Indata ändrade – kör analysen för att granska den nya resan.');
 }
@@ -34,7 +36,7 @@ function fill(request){for(const[key,value]of Object.entries(request)){const inp
 function syncPicker(){
   window.ReviewMap.setPickerPoints(['from','to'].map(endpoint=>({endpoint,lat:parseFloat(form.elements.namedItem(endpoint+'_lat').value),lon:parseFloat(form.elements.namedItem(endpoint+'_lon').value)})));
 }
-function read(){const request=Object.fromEntries(new FormData(form));delete request.analysis_mode;delete request.deadline;for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes','max_rides'])request[key]=Number(request[key]);request.max_time_minutes=120;return request;}
+function read(){const request=Object.fromEntries(new FormData(form));delete request.analysis_mode;delete request.deadline;for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes','max_rides','walk_speed_kmh','max_walk_minutes'])request[key]=Number(request[key]);request.max_time_minutes=120;return request;}
 form.elements.analysis_mode.addEventListener('change',()=>{$('deadline-label').hidden=form.elements.analysis_mode.value!=='deadline';});
 $('open-picker').addEventListener('click',()=>window.ReviewMap.pick((endpoint,lat,lon)=>{
   form.elements.namedItem(endpoint+'_lat').value=lat.toFixed(6);form.elements.namedItem(endpoint+'_lon').value=lon.toFixed(6);
@@ -45,7 +47,7 @@ async function run(request,presetId){
   invalidate();const token=generation;status('Läser analys…');
   try{
     let value=presetId?await api('/api/results/'+presetId):await api('/api/analyze',request);
-    value=await resolveJob(value,()=>token===generation);if(token!==generation||!value)return;
+    value=await resolveJob(value,()=>token===generation,message=>status(message));if(token!==generation||!value)return;
     if(value.status!=='OK')throw new Error(value.status+': '+(value.message||'Analysen kunde inte verifieras. Se den lokala körloggen.'));
     analysis=value.report;analysisId=value.analysis_id;render();
     status('Verifierad basanalys · '+analysis.minute_observations.length+' startminuter'+(analysis.metrics.route_coverage===0?' · Ingen resa inom analysens gränser för restid, gång och trafikben.':''));
@@ -217,7 +219,7 @@ api('/api/presets').then(value=>{
   if(value.coverage){const format=v=>v.slice(0,4)+'-'+v.slice(4,6)+'-'+v.slice(6);$('coverage').textContent=`Fryst tidtabell: ${format(value.coverage.first)}–${format(value.coverage.last)}. OSM: lon 12.95–13.30, lat 55.60–55.80. Börja med 1–5 minuter; högst 120 minuter per anrop.`;}
   for(const preset of value.presets){const button=text('button',preset.label,$('presets'));button.addEventListener('click',()=>{fill(preset.request);run(preset.request,preset.id);});}
   if(value.presets.length&&generation===0){
-    fill(value.presets[0].request);
+    fill({...value.presets[0].request,walk_speed_kmh:p.walk_speed_kmh,max_walk_minutes:p.max_walk_seconds/60});
     if(value.presets[0].id)run(value.presets[0].request,value.presets[0].id);
     else status('Ange punkter eller välj ett förval och klicka Analysera. Börja med ett litet intervall.');
   }else if(generation===0)status('Ange koordinater och kör analys.');

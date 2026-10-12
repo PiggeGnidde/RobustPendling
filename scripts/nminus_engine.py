@@ -10,6 +10,7 @@ from t90_core import PARAMETERS
 from nminus_core import HORIZON_SECONDS,INFORMATION,exclude_schedule,remaining_resources,summarize,pareto_add,normalize_walk_geometry
 from transit_inputs import ROOT,fingerprint
 from planner_core import routing_parameters,combined_nminus
+from walking_links import ensure_walking_links
 
 
 class NMinusEngine:
@@ -30,20 +31,21 @@ class NMinusEngine:
                 self.locations[tid]=(pi,ti,t,scoped)
         self.inactive=max(int(v[2].serviceCode) for v in self.locations.values())+1
         self.calendar_original={tid:int(v[2].serviceCode) for tid,v in self.locations.items()}
-        self.transfers_cache={};self.geometry_cache={}
+        self.transfers_cache={};self.geometry_cache={};self.parameters=dict(PARAMETERS)
 
     def calendar_check(self):
         if any(int(v[2].serviceCode)!=self.calendar_original[k] for k,v in self.locations.items()):raise RuntimeError('Scenario contaminated network calendar')
 
     def transfers(self,stop):
-        if stop not in self.transfers_cache:
+        key=(stop,self.parameters['walk_speed_kmh'],self.parameters['max_walk_seconds'])
+        if key not in self.transfers_cache:
             values={stop:0}
             pairs=self.layer.streetTransfers.get(self.indices[stop])
             for pos in range(0,pairs.size(),2):
-                seconds=int(pairs.get(pos+1)/(PARAMETERS['walk_speed_kmh']/3.6*1000))
-                if seconds<=900:values[self.ids[int(pairs.get(pos))]]=seconds
-            self.transfers_cache[stop]=values
-        return self.transfers_cache[stop]
+                seconds=int(pairs.get(pos+1)/(self.parameters['walk_speed_kmh']/3.6*1000))
+                if seconds<=self.parameters['max_walk_seconds']:values[self.ids[int(pairs.get(pos))]]=seconds
+            self.transfers_cache[key]=values
+        return self.transfers_cache[key]
 
     def java_times(self,values):
         jp=self.jpype;inner=jp.JClass('gnu.trove.map.hash.TIntIntHashMap')()
@@ -166,7 +168,9 @@ class NMinusEngine:
         from r5py.r5.regional_task import RegionalTask
         from r5py.r5.trip_planner import TripPlanner
         self.calendar_check()
-        meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides'],params['max_time_seconds']);origin=params['origin'];destination=params['destination']
+        meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides'],params['max_time_seconds'],params['walk_speed_kmh'],params['max_walk_seconds']);origin=params['origin'];destination=params['destination']
+        self.parameters=parameters
+        ensure_walking_links(self.network,parameters)
         first=datetime.fromisoformat(meta['start_minutes'][0]);self.display_zone=first.tzinfo
         feed_first=first.astimezone(ZoneInfo(params['feed_timezone']));self.midnight=feed_first.replace(hour=0,minute=0,second=0,microsecond=0)
         observations=report['minute_observations'];earliest=observations[0]['start_seconds']
@@ -177,17 +181,17 @@ class NMinusEngine:
             raise ValueError('N−1 service-day/DST crossing not yet supported')
         trips=load_trips(self.derived,feed_first,earliest,latest)
         request=RegionalTask(self.network,departure=feed_first,departure_time_window=timedelta(minutes=1),
-            transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],speed_walking=3.6,
-            max_time=timedelta(seconds=HORIZON_SECONDS),max_time_walking=timedelta(seconds=900),max_public_transport_rides=parameters['max_rides'])
+            transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],speed_walking=parameters['walk_speed_kmh'],
+            max_time=timedelta(seconds=HORIZON_SECONDS),max_time_walking=timedelta(seconds=parameters['max_walk_seconds']),max_public_transport_rides=parameters['max_rides'])
         req=request._regional_task;req.fromLat,req.fromLon=origin['lat'],origin['lon'];req.toLat,req.toLon=destination['lat'],destination['lon']
         planner=TripPlanner(self.network,request)
         access_paths={self.ids[int(k)]:v for k,v in planner._transit_access_paths[r5py.TransportMode.WALK].items()}
         egress_paths={self.ids[int(k)]:v for k,v in planner._transit_egress_paths[r5py.TransportMode.WALK].items()}
-        access={k:round(v.travel_time.total_seconds()) for k,v in access_paths.items() if v.travel_time.total_seconds()<=900}
-        egress={k:round(v.travel_time.total_seconds()) for k,v in egress_paths.items() if v.travel_time.total_seconds()<=900}
+        access={k:round(v.travel_time.total_seconds()) for k,v in access_paths.items() if v.travel_time.total_seconds()<=parameters['max_walk_seconds']}
+        egress={k:round(v.travel_time.total_seconds()) for k,v in egress_paths.items() if v.travel_time.total_seconds()<=parameters['max_walk_seconds']}
         direct=min((round(t.travel_time.total_seconds()) for t in planner.direct_paths),default=None)
         base_sweep=ScheduleSweep(trips,access,egress,self.transfers,parameters,direct_walk_seconds=direct)
-        code={name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_core.py','nminus_engine.py','schedule_sweep.py','r5_adapter.py','planner_core.py')}
+        code={name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_core.py','nminus_engine.py','schedule_sweep.py','r5_adapter.py','planner_core.py','walking_links.py')}
         scenarios={str(i):[] for i in range(1,parameters['max_rides']+1)};base_details=[];memo={};features=[];checks=[]
         for index,obs in enumerate(observations):
             base=base_sweep.at(obs['start_seconds'])

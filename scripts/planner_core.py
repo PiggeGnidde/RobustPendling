@@ -2,16 +2,21 @@
 import csv
 from datetime import datetime,timedelta
 import io
+import math
 import zipfile
 from t90_core import PARAMETERS,statistics
 
 
-def routing_parameters(max_rides=2, max_time_seconds=2700):
+def routing_parameters(max_rides=2, max_time_seconds=2700, walk_speed_kmh=3.6, max_walk_seconds=900):
     if isinstance(max_rides,bool) or not isinstance(max_rides,int) or not 1<=max_rides<=4:
         raise ValueError('Choose 1 to 4 transit legs')
     if isinstance(max_time_seconds,bool) or not isinstance(max_time_seconds,int) or not 60<=max_time_seconds<=7200 or max_time_seconds%60:
         raise ValueError('Choose a whole-minute journey horizon from 1 to 120 minutes')
-    return dict(PARAMETERS,max_rides=max_rides,max_time_seconds=max_time_seconds)
+    if isinstance(walk_speed_kmh,bool) or not isinstance(walk_speed_kmh,(int,float)) or not math.isfinite(walk_speed_kmh) or not 3<=walk_speed_kmh<=6:
+        raise ValueError('Walking speed must be 3 to 6 km/h')
+    if isinstance(max_walk_seconds,bool) or not isinstance(max_walk_seconds,int) or not 600<=max_walk_seconds<=1800 or max_walk_seconds%60:
+        raise ValueError('Whole walking budget must be 10 to 30 integer minutes')
+    return dict(PARAMETERS,max_rides=max_rides,max_time_seconds=max_time_seconds,walk_speed_kmh=float(walk_speed_kmh),max_walk_seconds=max_walk_seconds)
 
 
 def service_coverage(feed):
