@@ -23,6 +23,7 @@ def main():
     (ROOT/'cache/tmp').mkdir(parents=True,exist_ok=True)
     sys.argv=[sys.argv[0],'--max-memory',PARAMETERS['jvm_heap'],'--verbose']
     import r5py
+    import jpype
     from jvm_diagnostics import instrument_shutdown
     from detailed_routes import collect
     instrument_shutdown()
@@ -31,6 +32,7 @@ def main():
     derived=ROOT/'data/gtfs/skane-20261011-r0.zip'
     routing_feed(inputs['gtfs'],derived)
     network=None
+    nminus=None
     stops,_=gtfs_tables(inputs['gtfs'])
     names={s['stop_id']:s['stop_name'] for s in stops}
     coordinates={s['stop_id']:(float(s['stop_lon']),float(s['stop_lat'])) for s in stops}
@@ -39,6 +41,9 @@ def main():
         if task.get('command')=='stop':break
         try:
             report=json.loads(Path(task['report']).read_text(encoding='utf-8'))
+            actual_versions=dict(python=sys.version.split()[0],r5py=r5py.__version__,r5='7.5.1-r5py',
+                java=str(jpype.JClass('java.lang.System').getProperty('java.version')))
+            if actual_versions!=report['metadata']['versions']:raise ValueError('Runtime differs from baseline; regenerate baseline')
             expected=report['metadata']['input_hashes']
             if hashes['osm']!=expected['osm'] or hashes['gtfs']!=expected['gtfs_original']:
                 raise ValueError('Input hashes differ from analysis')
@@ -47,6 +52,17 @@ def main():
                 started=time.perf_counter()
                 network=r5py.TransportNetwork(inputs['osm'],[derived])
                 build_seconds=time.perf_counter()-started
+            if task.get('command')=='nminus':
+                from nminus_engine import NMinusEngine
+                if nminus is None:nminus=NMinusEngine(network,derived,stops,expected)
+                result=nminus.analyze(report)
+                from nminus_validation import validate_result
+                validate_result(result,report)
+                if any(fingerprint(inputs[k])!=hashes[k] for k in hashes):raise ValueError('Inputs changed during N−1 routing')
+                result.update(analysis_id=task['analysis_id'])
+                atomic_json(Path(task['output']),result)
+                print('REVIEW_RESULT '+task['output'],flush=True)
+                continue
             index=task['index']; obs=report['minute_observations'][index]
             instant=datetime.fromisoformat(obs['start']).astimezone(ZoneInfo('Europe/Stockholm'))
             ready=instant.hour*3600+instant.minute*60
@@ -61,7 +77,7 @@ def main():
                         worker_pid=os.getpid(),network_build_seconds=build_seconds,input_hashes=hashes)
         except Exception:
             traceback.print_exc(file=sys.stderr)
-            result=dict(status='DETAIL_ERROR',message='Detaljresan kunde inte verifieras. Se lokal workerlogg.',analysis_id=task['analysis_id'],index=task['index'])
+            result=dict(status='DETAIL_ERROR',message='Körningen kunde inte verifieras. Se lokal workerlogg.',analysis_id=task['analysis_id'],index=task.get('index'))
         atomic_json(Path(task['output']),result)
         print('REVIEW_RESULT '+task['output'],flush=True)
 

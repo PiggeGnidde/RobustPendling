@@ -18,6 +18,7 @@ from t90_core import PARAMETERS
 from jvm_diagnostics import cleanup_after_exit
 from smoke_helpers import gtfs_tables
 from validate_phase2c import CASES
+from nminus_validation import validate_result
 
 PRESETS=('lomma_lund','malmo_varnhem','gunnesbo_ideon')
 
@@ -75,6 +76,7 @@ class Review:
         self.lock=threading.Lock();self.analysis_lock=threading.Lock();self.process=None;self.log=None
         self.output=ROOT/'outputs/review';self.output.mkdir(parents=True,exist_ok=True)
         self.engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('review_detail_worker.py','detailed_routes.py','r5_adapter.py')})
+        self.nminus_engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_engine.py','nminus_core.py','review_detail_worker.py','schedule_sweep.py')})
         for name in PRESETS:
             path=ROOT/'outputs'/f'phase2c_{name}_1.json'
             if not path.exists():
@@ -145,11 +147,32 @@ class Review:
         found=cached_detail(report,identity,index)
         if found:return found
         path=self.output/f'detail-{identity}-{index}-{self.engine}.json'
+        return self.worker_task(identity,index,path,'detail')
+
+    def nminus(self,identity):
+        if identity not in self.reports:raise ValueError('Unknown analysis')
+        path=self.output/f'nminus-{identity}-{self.nminus_engine}.json'
+        # Reuse CLI validation artifacts only when baseline identity AND current
+        # N−1 code hashes match. Runtime/timing metadata is kept outside results.
+        if not path.exists():
+            for case in PRESETS:
+                saved=ROOT/'outputs/nminus'/f'{case}_1.json'
+                if saved.exists():
+                    value=json.loads(saved.read_text(encoding='utf-8'))
+                    if value.get('analysis_id')==identity and all(fingerprint(ROOT/'scripts'/name)==h for name,h in value.get('code_hashes',{}).items()) and value.get('code_hashes'):
+                        validate_result(value,self.reports[identity])
+                        atomic_json(path,value);break
+        return self.worker_task(identity,None,path,'nminus')
+
+    def worker_task(self,identity,index,path,command):
         def run():
             with self.lock:
                 if path.exists():
                     result=json.loads(path.read_text(encoding='utf-8'))
-                    if result['status']=='OK':return dict(result,source='cache')
+                    if result['status']=='OK':
+                        if result.get('analysis_id')!=identity:raise ValueError('Cache belongs to another analysis')
+                        if command=='nminus':validate_result(result,self.reports[identity])
+                        return dict(result,source='cache')
                 if self.process is None or self.process.poll() is not None:
                     self.reap()
                     self.log=(self.output/'detail-worker.stderr.log').open('w',encoding='utf-8')
@@ -163,7 +186,7 @@ class Review:
                         responses.put(None)
                     self.reader=threading.Thread(target=read_stdout,args=(self.process,self.responses),daemon=True)
                     self.reader.start()
-                self.process.stdin.write(json.dumps(dict(report=str(self.files[identity]),analysis_id=identity,index=index,output=str(path)))+'\n');self.process.stdin.flush()
+                self.process.stdin.write(json.dumps(dict(command=command,report=str(self.files[identity]),analysis_id=identity,index=index,output=str(path)))+'\n');self.process.stdin.flush()
                 try:
                     response=self.responses.get(timeout=600)
                     if response=='REVIEW_RESULT '+str(path):return json.loads(path.read_text(encoding='utf-8'))
@@ -211,11 +234,12 @@ def handler(review):
                 identity=path.rsplit('/',1)[1]
                 if identity not in review.reports:self.send(dict(message='Okänd analys'),404);return
                 self.send(dict(status='OK',analysis_id=identity,report=review.reports[identity]));return
-            static={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+            static={'/':'index.html','/app.js':'app.js','/review_map.js':'review_map.js','/style.css':'style.css'}
             if path not in static:self.send(dict(message='Hittades inte'),404);return
             body=(ROOT/'web'/static[path]).read_bytes();self.send_response(200)
-            self.send_header('Content-Type',{'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[path])
-            self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'")
+            self.send_header('Content-Type','text/html; charset=utf-8' if path=='/' else 'text/css; charset=utf-8' if path=='/style.css' else 'text/javascript; charset=utf-8')
+            self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self' https://unpkg.com 'unsafe-inline'; script-src 'self' https://unpkg.com; connect-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; object-src 'none'; frame-ancestors 'none'")
+            self.send_header('Referrer-Policy','strict-origin-when-cross-origin')
             self.end_headers();self.wfile.write(body)
         def do_POST(self):
             if not self.trusted():self.send(dict(message='Endast lokal åtkomst'),403);return
@@ -230,6 +254,7 @@ def handler(review):
                     return
                 if self.path=='/api/analyze':result=review.analyze(data)
                 elif self.path=='/api/detail':result=review.detail(data['analysis_id'],data['index'])
+                elif self.path=='/api/nminus':result=review.nminus(data['analysis_id'])
                 else:self.send(dict(message='Hittades inte'),404);return
                 self.send(result)
             except (ValueError,KeyError,TypeError) as error:self.send(dict(status='INVALID_REQUEST',message='Kontrollera koordinater, datum, tidszon och heltalsminuter.'),400)

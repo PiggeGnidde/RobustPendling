@@ -1,6 +1,9 @@
 # A–B-analyskontrakt, schema 2.0 (Phase 2B/2C)
 
 CLI:n `scripts/analyze_t90.py` är anropsgränsen för ett framtida webbgränssnitt.
+Det separata N−1-kontraktet och resultaten finns i
+[N_MINUS_ONE.md](N_MINUS_ONE.md) och [N_MINUS_ONE_VALIDATION.md](N_MINUS_ONE_VALIDATION.md).
+Basfallets definition och kod är oförändrade.
 Phase 2D lägger till en lokal granskningsserver, beskriven i
 [LOCAL_REVIEW.md](LOCAL_REVIEW.md). Metoden är **T90_schedule/R0**, variation i statisk
 tidtabell, med definition och databegränsningar i [T90_DEFINITION.md](T90_DEFINITION.md).

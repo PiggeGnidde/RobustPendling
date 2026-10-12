@@ -1,12 +1,42 @@
 <!doctype html>
-<html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RobustPendling · granskning</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body><header><span class="eyebrow">ROBUSTPENDLING / LOKAL GRANSKNING</span><h1>Hur varierar resan över startminuterna?</h1><p>Granska tidtabell, reskedja och kartgeometri för en resa från A till B.</p></header>
-<main><section class="panel"><div id="presets" class="row"></div><form id="inputs">
-<label>Från latitud<input name="from_lat" type="number" step="any" required></label><label>Från longitud<input name="from_lon" type="number" step="any" required></label><label>Till latitud<input name="to_lat" type="number" step="any" required></label><label>Till longitud<input name="to_lon" type="number" step="any" required></label>
-<label>Startnamn<input name="from_name"></label><label>Målnamn<input name="to_name"></label><label>Datum<input name="date" type="date" required></label><label>Starttid<input name="start" type="time" required></label><label>Fönster, minuter<input name="window_minutes" type="number" min="1" max="1440" required></label><label>Tidszon<input name="timezone" required></label><button type="submit" class="primary">Analysera</button></form><p id="parameters" class="muted"></p><p id="status" role="status" aria-live="polite">Läser förval…</p></section>
-<section id="results" hidden><div class="notice"><strong>Enligt tidtabell – förseningar ingår inte.</strong><span>Varje analyserad startminut har lika vikt i kvantilerna. Detta är variation över starttider, inte sannolikheten att komma fram i tid.</span></div><h2 id="relation"></h2><div id="metrics" class="metrics"></div>
-<section class="panel"><h2>Restid över startminuter</h2><p class="muted">Klicka på en punkt eller välj minut. Röda punkter markerar båda sidor om de största positiva hoppen.</p><svg id="curve" viewBox="0 0 960 270" role="img" aria-label="Restid per startminut"></svg><div id="jumps" class="row"></div></section>
-<div class="trip-head"><label>Granska startminut<select id="minute"></select></label><span id="detail-status" role="status" aria-live="polite"></span></div>
-<div id="trip" hidden class="split"><section class="panel"><div class="row"><h2>Resväg</h2><button id="map-reset">Återställ karta</button></div><svg id="map" viewBox="0 0 700 480" role="img" aria-label="Geografisk resväg i WGS84"></svg><p class="legend">Blå: buss · lila: tåg · grön: spårvagn · grå streck: gång · orange streck: approximativ anslutning · röd romb: byte</p><p class="muted">Geografisk karta i WGS84 utan bakgrundskartor. Dra för att flytta, använd mushjulet för zoom. Orange raka anslutningar binder anrops-/hållplatspunkter till R5:s gatunät; fysisk framkomlighet är inte verifierad där.</p></section><section class="panel"><h2 id="trip-title">Reskedja</h2><div id="trip-summary"></div><ol id="legs"></ol></section></div>
-<section class="panel"><h2>Valda linjekombinationer</h2><p>Andelar bland startminuternas valda optimala resor. Detta är inte en fullständig inventering av reservvägar. R5:s alternativsökning är begränsad.</p><div id="combinations"></div></section></section>
-<footer>Nästa analysläge: ”framme senast kl. …”. Ingen sådan beräkning ingår i denna vy.</footer></main></body></html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RobustPendling · tidtabell och N−1</title>
+  <link rel="stylesheet" href="/style.css">
+  <link id="leaflet-css" rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <script async src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script src="/review_map.js" defer></script><script src="/app.js" defer></script>
+</head>
+<body>
+<header><span class="eyebrow">ROBUSTPENDLING / LOKAL GRANSKNING</span><h1>Tidtabell och reservresa när en tur uteblir</h1><p>Jämför startminuter, genomförd resa och bästa möjliga fortsättning.</p></header>
+<main>
+<section class="panel"><div id="presets" class="row"></div><form id="inputs">
+  <label>Från latitud<input name="from_lat" type="number" step="any" required></label><label>Från longitud<input name="from_lon" type="number" step="any" required></label>
+  <label>Till latitud<input name="to_lat" type="number" step="any" required></label><label>Till longitud<input name="to_lon" type="number" step="any" required></label>
+  <label>Startnamn<input name="from_name"></label><label>Målnamn<input name="to_name"></label>
+  <label>Datum<input name="date" type="date" required></label><label>Starttid<input name="start" type="time" required></label>
+  <label>Fönster, minuter<input name="window_minutes" type="number" min="1" max="1440" required></label><label>Tidszon<input name="timezone" required></label>
+  <button type="submit" class="primary">Analysera</button>
+</form><p id="parameters" class="muted"></p><p id="status" role="status" aria-live="polite">Läser förval…</p></section>
+<section id="results" hidden>
+  <div class="notice"><strong>Enligt tidtabell – förseningar ingår inte.</strong><span>Varje analyserad startminut har lika vikt i baskvantilerna. Variation över starttider är inte sannolikheten att komma fram i tid.</span></div>
+  <h2 id="relation"></h2><div id="metrics" class="metrics"></div>
+  <section class="panel"><div class="row"><label>Scenario<select id="scenario"><option value="base">Basfall</option><option value="1">Ben 1 uteblir</option><option value="2">Ben 2 uteblir</option></select></label><span id="nminus-status" role="status" aria-live="polite"></span></div>
+    <div id="nminus-notice" class="notice scenario-notice" hidden><strong>Scenario enligt tidtabell – ingen sannolikhet för inställd tur uppskattas.</strong><span>Besked vid det felande benets planerade avgångstid, på dess påstigningshållplats. Genomförd resa och tid bevaras. Separata scenarier: exakt en tur uteblir åt gången. Sökhorisont: 120 minuter efter besked.</span></div>
+    <div id="nminus-summary" hidden><h2 id="nminus-heading"></h2><div id="nminus-metrics" class="metrics"></div><p id="nminus-population"></p></div>
+  </section>
+  <section class="panel"><h2>Total restid från ursprunglig startminut</h2><p class="muted">Blå kurva: basfall · lila: valt N−1-scenario · röda baspunkter: största bashoppen. Tom ring: ej tillämpligt. Röd punkt längst ned: ej nåbar. Klicka en punkt eller välj minut.</p><svg id="curve" viewBox="0 0 960 270" role="img" aria-label="Restid per startminut"></svg><div id="jumps" class="row"></div></section>
+  <div class="trip-head"><label>Granska startminut<select id="minute"></select></label><span id="detail-status" role="status" aria-live="polite"></span></div>
+  <div id="trip" hidden class="split">
+    <section class="panel"><div class="row"><h2>Resväg och reserv</h2><button id="map-reset">Återställ karta</button></div>
+      <p id="map-status" role="status" class="muted"></p><div id="map" aria-label="Geografisk resväg med OpenStreetMap"></div><svg id="map-fallback" hidden viewBox="0 0 700 480" role="img" aria-label="Resväg utan bakgrundskarta"></svg>
+      <p class="legend">Blå: basresa · grön: genomförd del · lila: reserv · streckat: gång · hel linje: buss/tåg (tjockare: tåg) · orange: approximativ anslutning · röd ring: besked om utebliven tur.</p>
+      <p class="muted">Orange anslutningar verifierar inte fysisk framkomlighet. Bakgrundsplattor hämtas från OpenStreetMap; leverantören ser kartutsnittet. <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · <a href="https://operations.osmfoundation.org/policies/tiles/">Användningsvillkor</a></p>
+    </section>
+    <section class="panel"><h2 id="trip-title">Reskedja</h2><div id="trip-summary"></div><ol id="legs"></ol></section>
+  </div>
+  <section class="panel"><h2>Valda linjekombinationer i basfallet</h2><p>Andelar bland startminuternas valda optimala resor. Detta är inte en fullständig inventering av reservvägar.</p><div id="combinations"></div></section>
+</section>
+<footer>Nästa analysläge: ”framme senast kl. …”. Ingen sådan beräkning ingår i denna vy.</footer>
+</main></body></html>

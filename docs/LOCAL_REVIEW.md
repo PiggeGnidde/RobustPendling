@@ -1,5 +1,12 @@
 # Lokal granskningsvy – Phase 2D
 
+Aktuell vidareutveckling lägger till separat N−1-scenarioval och en
+Leaflet/OpenStreetMap-bakgrund. Kontrakt, villkor och aktuella verifieringar
+finns i [N_MINUS_ONE.md](N_MINUS_ONE.md) och
+[N_MINUS_ONE_VALIDATION.md](N_MINUS_ONE_VALIDATION.md). Start-/stoppkommandon
+nedan är fortfarande desamma. Beskrivningen av den helt lokala SVG-kartan
+nedan avser Phase 2D; den finns nu som reserv när bakgrundsbiblioteket saknas.
+
 Vyn använder den validerade Phase 2C-motorn utan ändrad routing eller
 kvantildefinition. Varje startminut väger lika. **Enligt tidtabell –
 förseningar ingår inte.** Schedule-kvantiler är inte en sannolikhet för
