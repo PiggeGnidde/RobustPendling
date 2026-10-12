@@ -1,0 +1,487 @@
+{
+  "description": "Verified real four-leg completed+reserve trip; one exact start minute, not a population sample",
+  "parameters": {
+    "walk_speed_kmh": 3.6,
+    "max_time_seconds": 2700,
+    "max_walk_seconds": 900,
+    "max_rides": 4,
+    "board_slack_seconds": 60,
+    "boarding_rule": "departure > arrival_at_stop + 60",
+    "egress_slack_seconds": 60,
+    "modes": [
+      "WALK",
+      "TRANSIT"
+    ],
+    "percentile_method": "nearest_rank_ceiling",
+    "missing": "positive_infinity",
+    "jvm_heap": "4G",
+    "frequencies_policy": "reject_nonempty",
+    "pickup_dropoff_policy": "allow 0 and 3; reject 1 and 2",
+    "tie_break": "duration, walking, lexicographic trip/boarding/alighting IDs",
+    "origin": {
+      "id": "from",
+      "source": "request",
+      "lat": 55.604043,
+      "lon": 13.027124,
+      "name": "Ellstorp"
+    },
+    "destination": {
+      "id": "to",
+      "source": "request",
+      "lat": 55.72066,
+      "lon": 13.231109,
+      "name": "Brunnshögstorget"
+    },
+    "r5_suboptimal_minutes": 5,
+    "window_start": "06:54:00",
+    "window_end_inclusive": "2026-10-12T06:54:59+02:00",
+    "window_minutes": 1,
+    "network_area": {
+      "status": "OK",
+      "area": {
+        "bbox": [
+          12.95,
+          55.6,
+          13.3,
+          55.8
+        ],
+        "source": "prepare_lomma_lund.ps1 complete_ways extraction rectangle"
+      },
+      "outside": []
+    },
+    "schema_version": "2.0",
+    "feed_timezone": "Europe/Stockholm",
+    "feed_service_date": "2026-10-12",
+    "allow_pure_walk": true,
+    "geometry_crs": "EPSG:4326",
+    "audit_jumps": 0,
+    "r5_permission_adapter": "filter_before_dominance_pruning",
+    "sweep": "independent_bounded_1_to_4_rides_on_R5_walking_links",
+    "exact_r5_adapter_seed": 0,
+    "exact_r5_interval_seconds": 2,
+    "native_diagnostic_draws": 1
+  },
+  "versions": {
+    "python": "3.12.15",
+    "r5py": "1.1.7",
+    "r5": "7.5.1-r5py",
+    "java": "21.0.10"
+  },
+  "input_hashes": {
+    "osm": {
+      "size_bytes": 9687479,
+      "sha256": "47942e06ea6c96c8893933f71f448f7e1deac9d906c216a16c60a414db521b9d"
+    },
+    "gtfs_original": {
+      "size_bytes": 38123482,
+      "sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182"
+    },
+    "gtfs_derived": {
+      "size_bytes": 38027108,
+      "sha256": "0a43ea916ed78a0d26a71e471483a0ee07bf1131fd0e7504be03ac7f6a1d6a9f"
+    },
+    "r5_jar": {
+      "size_bytes": 64437972,
+      "sha256": "d50be106cadd7b636cfc0e209052767d7df570629f79fdf98ecd5cf5d2d89be7"
+    }
+  },
+  "code_hashes": {
+    "nminus_core.py": {
+      "size_bytes": 4785,
+      "sha256": "4e6cbcb6256540d4ff5f83812c1b991f2298e257ab760da2737c22ad52910d09"
+    },
+    "nminus_engine.py": {
+      "size_bytes": 21213,
+      "sha256": "89f4476992d082b7001d901f476e5119707ec5527b38b2bf2928821a9fe6c524"
+    },
+    "schedule_sweep.py": {
+      "size_bytes": 13512,
+      "sha256": "0e05c633713abecf03cccf2b2fc81338b647ac316f6a77375987793102205d80"
+    },
+    "r5_adapter.py": {
+      "size_bytes": 1941,
+      "sha256": "46ff71c6e0ca007a0a8d5c21391b89500097b68dde94f47dcf766f94066a3e31"
+    },
+    "planner_core.py": {
+      "size_bytes": 4460,
+      "sha256": "cf0111b12104af3fcf907d0d83a12d718aff6da3c2d72dea5af76fb961737375"
+    }
+  },
+  "source_result_sha256": "a23c8b8273fa9f19c74d7ec92b91a26f0ffc8c5312bb0261954fbeaaa90fa7a0",
+  "baseline": {
+    "count": 1,
+    "reachable_count": 1,
+    "unreachable_count": 0,
+    "route_coverage": 1.0,
+    "percentiles_seconds": {
+      "T50": 2304,
+      "T90": 2304,
+      "T99": 2304
+    },
+    "minimum_seconds": 2304,
+    "maximum_seconds": 2304,
+    "mean_seconds": 2304.0,
+    "reachable_mean_seconds": 2304.0,
+    "buffer_90": 0,
+    "buffer_99": 0,
+    "full_range": 0,
+    "dominant_route_family": "rf_4bb44c8aa4832a3d58b8cc52fe41992e2c068a9aaab14cdeec8f7a7f50fa5398",
+    "dominant_route_share": 1.0,
+    "dominant_route_share_all_minutes": 1.0,
+    "distinct_selected_route_families": 1,
+    "transfer_count_distribution": {
+      "1": 1
+    },
+    "departure_sensitivity": {
+      "seconds": 0,
+      "from_start": null,
+      "to_start": null
+    },
+    "unreachable_transitions": {}
+  },
+  "combined": {
+    "minute_observations": [
+      {
+        "index": 0,
+        "start": "2026-10-12T06:54:00+02:00",
+        "total_seconds": 4060,
+        "status": "REACHABLE",
+        "worst_leg": 2,
+        "transit_leg_count": 2
+      }
+    ],
+    "summary": {
+      "count": 1,
+      "reachable_count": 1,
+      "unreachable_count": 0,
+      "route_coverage": 1.0,
+      "percentiles_seconds": {
+        "T50": 4060,
+        "T90": 4060,
+        "T99": 4060
+      },
+      "minimum_seconds": 4060,
+      "maximum_seconds": 4060,
+      "mean_seconds": 4060.0,
+      "reachable_mean_seconds": 4060.0,
+      "all_failures_covered_share": 1.0,
+      "no_transit_leg_count": 0,
+      "definition": "Worst single-leg cancellation of chosen optimal baseline; unreachable is positive infinity; pure walk uses baseline"
+    }
+  },
+  "scenarios": [
+    {
+      "start": "2026-10-12T06:54:00+02:00",
+      "leg_number": 1,
+      "failed_instance": {
+        "feed": "SE-st",
+        "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+        "trip_id": "121120000400852770",
+        "service_date": "2026-10-12",
+        "r5_scoped_trip_id": "SE-st:121120000400852770"
+      },
+      "notification": {
+        "stop_id": "9022012080129001",
+        "stop_name": "Malmö Ellstorp",
+        "coordinates": [
+          13.027124,
+          55.604043
+        ],
+        "time": "2026-10-12T06:55:29+02:00"
+      },
+      "total_seconds": 2304,
+      "extra_seconds": 0,
+      "remaining_parameters": {
+        "walk_speed_kmh": 3.6,
+        "max_time_seconds": 7200,
+        "max_walk_seconds": 891,
+        "max_rides": 4,
+        "board_slack_seconds": 60,
+        "boarding_rule": "departure > arrival_at_stop + 60",
+        "egress_slack_seconds": 60,
+        "modes": [
+          "WALK",
+          "TRANSIT"
+        ],
+        "percentile_method": "nearest_rank_ceiling",
+        "missing": "positive_infinity",
+        "jvm_heap": "4G",
+        "frequencies_policy": "reject_nonempty",
+        "pickup_dropoff_policy": "allow 0 and 3; reject 1 and 2",
+        "tie_break": "duration, walking, lexicographic trip/boarding/alighting IDs"
+      },
+      "completed_elapsed_seconds": 89,
+      "completed": [
+        {
+          "mode": "WALK",
+          "start_stop": null,
+          "end_stop": "9022012080129001",
+          "start_stop_name": "Ellstorp",
+          "end_stop_name": "Malmö Ellstorp",
+          "departure": "2026-10-12T06:54:00+02:00",
+          "arrival": "2026-10-12T06:54:09+02:00",
+          "travel_seconds": 9,
+          "walking_seconds": 9,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        }
+      ],
+      "reserve": [
+        {
+          "mode": "WALK",
+          "start_stop": "9022012080129001",
+          "end_stop": "9022012080110011",
+          "start_stop_name": "Malmö Ellstorp",
+          "end_stop_name": "Malmö Värnhem",
+          "departure": "2026-10-12T06:55:29+02:00",
+          "arrival": "2026-10-12T07:02:11+02:00",
+          "travel_seconds": 402,
+          "walking_seconds": 402,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        },
+        {
+          "mode": "BUS",
+          "start_stop": "9022012080110011",
+          "end_stop": "9022012081240002",
+          "start_stop_name": "Malmö Värnhem",
+          "end_stop_name": "Lund Brunnshög västra",
+          "departure": "2026-10-12T07:05:00+02:00",
+          "arrival": "2026-10-12T07:24:00+02:00",
+          "travel_seconds": 1140,
+          "walking_seconds": 0,
+          "wait_seconds": 169,
+          "fixed_slack_seconds": 0,
+          "route_id": "9011012016800000",
+          "line": "168",
+          "trip_id": "121120000399087863",
+          "geometry_source": "R5_GTFS_hops"
+        },
+        {
+          "mode": "WALK",
+          "start_stop": "9022012081240002",
+          "end_stop": null,
+          "start_stop_name": "Lund Brunnshög västra",
+          "end_stop_name": "Brunnshögstorget",
+          "departure": "2026-10-12T07:25:00+02:00",
+          "arrival": "2026-10-12T07:32:24+02:00",
+          "travel_seconds": 444,
+          "walking_seconds": 444,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 60,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        }
+      ]
+    },
+    {
+      "start": "2026-10-12T06:54:00+02:00",
+      "leg_number": 2,
+      "failed_instance": {
+        "feed": "SE-st",
+        "feed_sha256": "6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182",
+        "trip_id": "121120000399087863",
+        "service_date": "2026-10-12",
+        "r5_scoped_trip_id": "SE-st:121120000399087863"
+      },
+      "notification": {
+        "stop_id": "9022012080110011",
+        "stop_name": "Malmö Värnhem",
+        "coordinates": [
+          13.022601,
+          55.604264
+        ],
+        "time": "2026-10-12T07:05:00+02:00"
+      },
+      "total_seconds": 4060,
+      "extra_seconds": 1756,
+      "remaining_parameters": {
+        "walk_speed_kmh": 3.6,
+        "max_time_seconds": 7200,
+        "max_walk_seconds": 648,
+        "max_rides": 3,
+        "board_slack_seconds": 60,
+        "boarding_rule": "departure > arrival_at_stop + 60",
+        "egress_slack_seconds": 60,
+        "modes": [
+          "WALK",
+          "TRANSIT"
+        ],
+        "percentile_method": "nearest_rank_ceiling",
+        "missing": "positive_infinity",
+        "jvm_heap": "4G",
+        "frequencies_policy": "reject_nonempty",
+        "pickup_dropoff_policy": "allow 0 and 3; reject 1 and 2",
+        "tie_break": "duration, walking, lexicographic trip/boarding/alighting IDs"
+      },
+      "completed_elapsed_seconds": 660,
+      "completed": [
+        {
+          "mode": "WALK",
+          "start_stop": null,
+          "end_stop": "9022012080129001",
+          "start_stop_name": "Ellstorp",
+          "end_stop_name": "Malmö Ellstorp",
+          "departure": "2026-10-12T06:54:00+02:00",
+          "arrival": "2026-10-12T06:54:09+02:00",
+          "travel_seconds": 9,
+          "walking_seconds": 9,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        },
+        {
+          "mode": "BUS",
+          "start_stop": "9022012080129001",
+          "end_stop": "9022012080110008",
+          "start_stop_name": "Malmö Ellstorp",
+          "end_stop_name": "Malmö Värnhem",
+          "departure": "2026-10-12T06:55:29+02:00",
+          "arrival": "2026-10-12T06:57:00+02:00",
+          "travel_seconds": 91,
+          "walking_seconds": 0,
+          "wait_seconds": 80,
+          "fixed_slack_seconds": 0,
+          "route_id": "9011012000600000",
+          "line": "6",
+          "trip_id": "121120000400852770",
+          "geometry_source": "R5_GTFS_hops"
+        },
+        {
+          "mode": "WALK",
+          "start_stop": "9022012080110008",
+          "end_stop": "9022012080110011",
+          "start_stop_name": "Malmö Värnhem",
+          "end_stop_name": "Malmö Värnhem",
+          "departure": "2026-10-12T06:57:00+02:00",
+          "arrival": "2026-10-12T07:01:03+02:00",
+          "travel_seconds": 243,
+          "walking_seconds": 243,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        }
+      ],
+      "reserve": [
+        {
+          "mode": "WALK",
+          "start_stop": "9022012080110011",
+          "end_stop": "9022012080110005",
+          "start_stop_name": "Malmö Värnhem",
+          "end_stop_name": "Malmö Värnhem",
+          "departure": "2026-10-12T07:05:00+02:00",
+          "arrival": "2026-10-12T07:09:05+02:00",
+          "travel_seconds": 245,
+          "walking_seconds": 245,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        },
+        {
+          "mode": "BUS",
+          "start_stop": "9022012080110005",
+          "end_stop": "9022012081069002",
+          "start_stop_name": "Malmö Värnhem",
+          "end_stop_name": "Trafikplats Lund södra",
+          "departure": "2026-10-12T07:14:00+02:00",
+          "arrival": "2026-10-12T07:25:25+02:00",
+          "travel_seconds": 685,
+          "walking_seconds": 0,
+          "wait_seconds": 295,
+          "fixed_slack_seconds": 0,
+          "route_id": "9011012013100000",
+          "line": "131",
+          "trip_id": "121120000331367422",
+          "geometry_source": "R5_GTFS_hops"
+        },
+        {
+          "mode": "BUS",
+          "start_stop": "9022012081069002",
+          "end_stop": "9022012081216013",
+          "start_stop_name": "Trafikplats Lund södra",
+          "end_stop_name": "Lund C",
+          "departure": "2026-10-12T07:28:34+02:00",
+          "arrival": "2026-10-12T07:39:00+02:00",
+          "travel_seconds": 626,
+          "walking_seconds": 0,
+          "wait_seconds": 189,
+          "fixed_slack_seconds": 0,
+          "route_id": "9011012016500000",
+          "line": "165",
+          "trip_id": "121120000400953200",
+          "geometry_source": "R5_GTFS_hops"
+        },
+        {
+          "mode": "WALK",
+          "start_stop": "9022012081216013",
+          "end_stop": "9022012081216001",
+          "start_stop_name": "Lund C",
+          "end_stop_name": "Lund C",
+          "departure": "2026-10-12T07:39:00+02:00",
+          "arrival": "2026-10-12T07:40:43+02:00",
+          "travel_seconds": 103,
+          "walking_seconds": 103,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 0,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        },
+        {
+          "mode": "TRAM",
+          "start_stop": "9022012081216001",
+          "end_stop": "9022012081260001",
+          "start_stop_name": "Lund C",
+          "end_stop_name": "Lund Brunnshögstorget",
+          "departure": "2026-10-12T07:45:00+02:00",
+          "arrival": "2026-10-12T07:55:49+02:00",
+          "travel_seconds": 649,
+          "walking_seconds": 0,
+          "wait_seconds": 257,
+          "fixed_slack_seconds": 0,
+          "route_id": "9011012073700000",
+          "line": "1",
+          "trip_id": "121120000399736065",
+          "geometry_source": "R5_GTFS_hops"
+        },
+        {
+          "mode": "WALK",
+          "start_stop": "9022012081260001",
+          "end_stop": null,
+          "start_stop_name": "Lund Brunnshögstorget",
+          "end_stop_name": "Brunnshögstorget",
+          "departure": "2026-10-12T07:56:49+02:00",
+          "arrival": "2026-10-12T08:01:40+02:00",
+          "travel_seconds": 291,
+          "walking_seconds": 291,
+          "wait_seconds": 0,
+          "fixed_slack_seconds": 60,
+          "route_id": null,
+          "line": null,
+          "trip_id": null,
+          "geometry_source": "R5_street_path"
+        }
+      ]
+    }
+  ]
+}

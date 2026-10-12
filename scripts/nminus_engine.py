@@ -9,6 +9,7 @@ from schedule_sweep import ScheduleSweep,load_trips
 from t90_core import PARAMETERS
 from nminus_core import HORIZON_SECONDS,INFORMATION,exclude_schedule,remaining_resources,summarize,pareto_add,normalize_walk_geometry
 from transit_inputs import ROOT,fingerprint
+from planner_core import routing_parameters,combined_nminus
 
 
 class NMinusEngine:
@@ -124,8 +125,8 @@ class NMinusEngine:
         rides=row['rides']
         if not rides:
             if access_stop:
-                geometry,connectors=connect_walk_geometry(mapping(egress_paths[access_stop].geometry),self.coords[access_stop],(destination['lon'],destination['lat']))
-            else:geometry,connectors=connect_walk_geometry(mapping(planner.direct_paths[0].legs[0].geometry),(origin['lon'],origin['lat']),(destination['lon'],destination['lat']))
+                geometry,connectors=normalize_walk_geometry(mapping(egress_paths[access_stop].geometry),self.coords[access_stop],(destination['lon'],destination['lat']))
+            else:geometry,connectors=normalize_walk_geometry(mapping(planner.direct_paths[0].legs[0].geometry),(origin['lon'],origin['lat']),(destination['lon'],destination['lat']))
             slack=row.get('fixed_slack_seconds',0)
             add('WALK',access_stop,None,ready+slack,row['arrival_seconds'],geometry,connectors,slack=slack)
             return result
@@ -137,7 +138,7 @@ class NMinusEngine:
                     seconds=self.transfers(access_stop)[a];geometry,connectors=self.walk_geometry(planner,access_stop,a)
                 else:
                     seconds=round(access_paths[a].travel_time.total_seconds())
-                    geometry,connectors=connect_walk_geometry(mapping(access_paths[a].geometry),(origin['lon'],origin['lat']),self.coords[a])
+                    geometry,connectors=normalize_walk_geometry(mapping(access_paths[a].geometry),(origin['lon'],origin['lat']),self.coords[a])
                 add('WALK',access_stop,a,cursor,cursor+seconds,geometry,connectors)
             elif previous!=a:
                 seconds=self.transfers(previous)[a];geometry,connectors=self.walk_geometry(planner,previous,a)
@@ -153,29 +154,31 @@ class NMinusEngine:
             add(mode_name(ride['mode']),a,b,ride['departure_seconds'],ride['arrival_seconds'],geometry,ride=ride)
             previous=b
         seconds=round(egress_paths[previous].travel_time.total_seconds())
-        geometry,connectors=connect_walk_geometry(mapping(egress_paths[previous].geometry),self.coords[previous],(destination['lon'],destination['lat']))
+        geometry,connectors=normalize_walk_geometry(mapping(egress_paths[previous].geometry),self.coords[previous],(destination['lon'],destination['lat']))
         add('WALK',previous,None,cursor+60,cursor+60+seconds,geometry,connectors,slack=60)
         if cursor!=row['arrival_seconds']:raise RuntimeError('Geometry itinerary differs from search')
         return result
 
     def iso(self,seconds):return (self.midnight+timedelta(seconds=seconds)).astimezone(self.display_zone).isoformat()
 
-    def analyze(self,report):
+    def analyze(self,report,baseline_only=False):
         import r5py
         from r5py.r5.regional_task import RegionalTask
         from r5py.r5.trip_planner import TripPlanner
         self.calendar_check()
-        meta=report['metadata'];params=meta['parameters'];origin=params['origin'];destination=params['destination']
+        meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides']);origin=params['origin'];destination=params['destination']
         first=datetime.fromisoformat(meta['start_minutes'][0]);self.display_zone=first.tzinfo
         feed_first=first.astimezone(ZoneInfo(params['feed_timezone']));self.midnight=feed_first.replace(hour=0,minute=0,second=0,microsecond=0)
         observations=report['minute_observations'];earliest=observations[0]['start_seconds']
-        latest=observations[-1]['start_seconds']+PARAMETERS['max_time_seconds']+HORIZON_SECONDS
-        if (self.midnight+timedelta(seconds=latest)).utcoffset()!=self.midnight.utcoffset() or latest>=86400:
+        has_transit=any(obs.get('rides') for obs in observations)
+        latest=observations[-1]['start_seconds']+parameters['max_time_seconds']+(HORIZON_SECONDS if has_transit else 0)
+        reference_offset=self.midnight.utcoffset() if has_transit else feed_first.utcoffset()
+        if (self.midnight+timedelta(seconds=latest)).utcoffset()!=reference_offset or latest>=86400:
             raise ValueError('N−1 service-day/DST crossing not yet supported')
         trips=load_trips(self.derived,feed_first,earliest,latest)
         request=RegionalTask(self.network,departure=feed_first,departure_time_window=timedelta(minutes=1),
             transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],speed_walking=3.6,
-            max_time=timedelta(seconds=HORIZON_SECONDS),max_time_walking=timedelta(seconds=900),max_public_transport_rides=2)
+            max_time=timedelta(seconds=HORIZON_SECONDS),max_time_walking=timedelta(seconds=900),max_public_transport_rides=parameters['max_rides'])
         req=request._regional_task;req.fromLat,req.fromLon=origin['lat'],origin['lon'];req.toLat,req.toLon=destination['lat'],destination['lon']
         planner=TripPlanner(self.network,request)
         access_paths={self.ids[int(k)]:v for k,v in planner._transit_access_paths[r5py.TransportMode.WALK].items()}
@@ -183,14 +186,15 @@ class NMinusEngine:
         access={k:round(v.travel_time.total_seconds()) for k,v in access_paths.items() if v.travel_time.total_seconds()<=900}
         egress={k:round(v.travel_time.total_seconds()) for k,v in egress_paths.items() if v.travel_time.total_seconds()<=900}
         direct=min((round(t.travel_time.total_seconds()) for t in planner.direct_paths),default=None)
-        base_sweep=ScheduleSweep(trips,access,egress,self.transfers,direct_walk_seconds=direct)
-        code={name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_core.py','nminus_engine.py','schedule_sweep.py','r5_adapter.py')}
-        scenarios={str(i):[] for i in range(1,PARAMETERS['max_rides']+1)};base_details=[];memo={};features=[];checks=[]
+        base_sweep=ScheduleSweep(trips,access,egress,self.transfers,parameters,direct_walk_seconds=direct)
+        code={name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_core.py','nminus_engine.py','schedule_sweep.py','r5_adapter.py','planner_core.py')}
+        scenarios={str(i):[] for i in range(1,parameters['max_rides']+1)};base_details=[];memo={};features=[];checks=[]
         for index,obs in enumerate(observations):
             base=base_sweep.at(obs['start_seconds'])
             if base!= {k:v for k,v in obs.items() if k in base}:raise RuntimeError('Baseline sweep changed')
-            baseline_raw=self.raw(request,obs['start_seconds'],access,egress,PARAMETERS,direct,0)
+            baseline_raw=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
             if baseline_raw!=obs['duration_seconds']:raise RuntimeError('Baseline raw R5 mismatch')
+            if baseline_only:continue
             if base['duration_seconds'] is None:
                 base_details.append(None)
                 for rows in scenarios.values():rows.append(dict(index=index,start=obs['start'],status='NOT_APPLICABLE',reason='BASE_UNREACHABLE'))
@@ -204,7 +208,7 @@ class NMinusEngine:
                     rows.append(dict(index=index,start=obs['start'],status='NOT_APPLICABLE',reason='NO_SUCH_TRANSIT_LEG'));continue
                 position=transit_positions[leg_number-1];failed=base['rides'][leg_number-1]
                 ready=failed['departure_seconds'];stop=failed['start_stop'];prefix=copy.deepcopy(base_segments[:position])
-                walked=sum(s['walking_seconds'] for s in prefix);resources=remaining_resources(walked,leg_number-1,PARAMETERS)
+                walked=sum(s['walking_seconds'] for s in prefix);resources=remaining_resources(walked,leg_number-1,parameters)
                 key=(stop,ready,failed['trip_id'],walked,leg_number-1)
                 if key not in memo:
                     eligible=[t for t in trips if t['id']!=failed['trip_id']]
@@ -242,12 +246,15 @@ class NMinusEngine:
                 row['geojson']=validate_geojson(dict(type='FeatureCollection',features=row_features));features.extend(row_features);rows.append(row)
                 checks.append(dict(index=index,leg_number=leg_number,raw_equals_sweep=raw==reserve['duration_seconds'],calendar_restored=True))
             # Every scenario above restores the shared network before this baseline check.
-            after=self.raw(request,obs['start_seconds'],access,egress,PARAMETERS,direct,0)
+            after=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
             if after!=baseline_raw:raise RuntimeError('Scenario altered subsequent baseline')
-        result=dict(status='OK',schema_version='nminus-1.0',information_assumption=INFORMATION,
+        if baseline_only:
+            self.calendar_check()
+            return dict(status='OK',base_metrics=report['metrics'],minutes_checked=len(observations),baseline_sweep_and_raw_r5_equal=True,network_build_count=1)
+        result=dict(status='OK',schema_version='nminus-1.1',information_assumption=INFORMATION,
             label='Scenario enligt tidtabell – ingen sannolikhet för inställd tur uppskattas.',
             horizon_seconds=HORIZON_SECONDS,base_experiment_sha256=meta['experiment_sha256'],
-            input_hashes=self.hashes,code_hashes=code,versions=meta['versions'],date=meta['date'],timezone=meta['timezone'],parameters=PARAMETERS,
+            input_hashes=self.hashes,code_hashes=code,versions=meta['versions'],date=meta['date'],timezone=meta['timezone'],parameters=parameters,
             minute_observations=observations,base_metrics=report['metrics'],base_itineraries=base_details,
             scenarios=scenarios,summaries={k:summarize(v) for k,v in scenarios.items()},
             verification=dict(baseline_before_after_equal_count=len(observations),checks=checks,
@@ -256,5 +263,6 @@ class NMinusEngine:
             geojson=validate_geojson(dict(type='FeatureCollection',features=features)))
         self.calendar_check()
         if any(fingerprint(ROOT/'scripts'/name)!=value for name,value in code.items()):raise RuntimeError('N−1 code changed while running')
+        result['combined']=combined_nminus(observations,scenarios)
         result['canonical_sha256']=hashlib.sha256(json.dumps(result,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
         return result

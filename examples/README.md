@@ -18,3 +18,16 @@ Utdraget återskapas från lokala, ignorerade `outputs/nminus/*_1.json`:
 ```
 
 Kommandot läser endast sparade resultat och gör ingen routing.
+
+`planner-summary.json` härleder samlat N−1 (inklusive reglerna för +∞) och
+deadline 08:00 ur samma tre frysta regressioner. Originalexemplet ovan
+behålls oförändrat. Återskapa med `python -B scripts/export_planner_examples.py`
+i projektmiljön; ingen ny routing görs.
+
+`planner-four-leg-reserve.json` visar ett verkligt verifierat fyrabensfall
+(genomförd buss 6 plus tre reservben 131→165→1). Det är ett enminutsprov,
+inte en större kvantilpopulation. Återskapa utdraget från lokala resultat:
+
+```powershell
+python -B scripts/export_planner_examples.py --baseline outputs/planner/ellstorp-max4-base.json --nminus outputs/planner/ellstorp-max4-nminus.json
+```

@@ -8,9 +8,10 @@ from datetime import datetime,timedelta
 import copy
 import json
 from analysis_contract import family,mode_name,validate_geojson,itinerary_timing,connect_walk_geometry
+_GEOMETRY_ADAPTERS={}
 
 
-def collect(network,origin,destination,representative,observation,feed_instant,trip_lookup,stop_names,stop_coordinates):
+def collect(network,origin,destination,representative,observation,feed_instant,trip_lookup,stop_names,stop_coordinates,parameters=None):
     import r5py
     import jpype
     import pandas as pd
@@ -19,13 +20,16 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
     from shapely import from_wkt,line_merge
     from r5py.r5.trip_planner import TripPlanner
     from t90_core import PARAMETERS
+    parameters=parameters or PARAMETERS
     from r5_adapter import dominating_factory
+    from nminus_core import normalize_walk_geometry
     if r5py.__version__!='1.1.7':raise RuntimeError('Detailed adapter requires r5py 1.1.7')
     layer=network._transport_network.transitLayer
     ready=feed_instant.hour*3600+feed_instant.minute*60
     midnight=feed_instant.replace(hour=0,minute=0,second=0,microsecond=0)
     ids={i:str(layer.stopIdForIndex.get(i)).split(':',1)[1] for i in range(layer.getStopCount())}
     diagnostics={}
+    planners=[]
     line_lookup={t['route_id']:t['line'] for t in trip_lookup.values()}
     def frame(p):
         return gpd.GeoDataFrame({'id':[p['id']]},geometry=[Point(p['lon'],p['lat'])],crs='EPSG:4326')
@@ -42,6 +46,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             req.fromLat,req.fromLon=origin['lat'],origin['lon']
             req.toLat,req.toLon=destination['lat'],destination['lon']
             planner=TripPlanner(network,request)
+            planners.append(planner)
             # Keep the same access/egress budget as the exhaustive sweep.
             def times(paths):
                 outer=jpype.JClass('java.util.HashMap')()
@@ -55,12 +60,12 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             router=jpype.JClass('com.conveyal.r5.profile.McRaptorSuboptimalPathProfileRouter')
             req.fromTime,req.toTime,req.monteCarloDraws=ready-1,ready+1,1
             engine=router(network,request,times(planner._transit_access_paths),times(planner._transit_egress_paths),
-                          dominating_factory(layer,int(req.suboptimalMinutes)),None,True)
+                          dominating_factory(layer,int(req.suboptimalMinutes),parameters=parameters,ready=ready),None,True)
             field=router.class_.getDeclaredField('mersenneTwister');field.setAccessible(True)
             field.set(engine,jpype.JClass('org.apache.commons.math3.random.MersenneTwister')(0))
             engine.route()
             evaluated=sorted(int(k) for k in engine.finalStatesByDepartureTime.keys())
-            if evaluated!=[ready]:raise RuntimeError('Detailed adapter did not evaluate the exact requested minute')
+            if evaluated not in ([ready],[]):raise RuntimeError('Detailed adapter did not evaluate the exact requested minute')
             diagnostics['evaluated_seconds']=evaluated
             options=[]
             for trip in planner.direct_paths:
@@ -68,7 +73,8 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                 seconds=round(leg.travel_time.total_seconds())
                 if seconds<=900:
                     options.append([segment('WALK',ready,seconds,0,leg.geometry)])
-            for state in engine.finalStatesByDepartureTime.get(ready):
+            states=engine.finalStatesByDepartureTime.get(ready)
+            for state in states if states is not None else []:
                 chain=[];current=state
                 while current is not None:chain.append(current);current=current.back
                 chain.reverse()
@@ -113,7 +119,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
     result=ExactDetailed(network,frame(origin),frame(destination),departure=feed_instant,
            departure_time_window=timedelta(minutes=5),speed_walking=3.6,
            transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-           max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),max_public_transport_rides=2)
+           max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),max_public_transport_rides=parameters['max_rides'])
     result=result.to_crs('EPSG:4326')
     families={};invalid=0
     for _,group in result.groupby('option'):
@@ -129,7 +135,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
             geometry=mapping(r.geometry)
             connectors=None
             if mode_name(r.transport_mode)=='WALK':
-                geometry,connectors=connect_walk_geometry(geometry,
+                geometry,connectors=normalize_walk_geometry(geometry,
                     stop_coordinates[a] if a else (origin['lon'],origin['lat']),
                     stop_coordinates[b] if b else (destination['lon'],destination['lat']))
             legs.append(dict(mode=mode_name(r.transport_mode),route_id=route,
@@ -156,6 +162,24 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
         if f['id'] not in families or (total,walking,json.dumps(legs,sort_keys=True))<(families[f['id']]['duration_seconds'],families[f['id']]['walking_seconds'],json.dumps(families[f['id']]['segments'],sort_keys=True)):
             families[f['id']]=item
     primary_family=family(observation.get('rides',[]))['id']
+    # R5 dominance may retain another equally fast chain. Always map the
+    # exact independently selected baseline, including its trip instances.
+    from nminus_engine import NMinusEngine
+    java_network=network._transport_network
+    if java_network not in _GEOMETRY_ADAPTERS:
+        stops=[dict(stop_id=stop,stop_name=stop_names[stop],stop_lon=coords[0],stop_lat=coords[1]) for stop,coords in stop_coordinates.items()]
+        _GEOMETRY_ADAPTERS[java_network]=NMinusEngine(network,None,stops,{})
+    geometry_adapter=_GEOMETRY_ADAPTERS[java_network]
+    geometry_adapter.midnight=midnight
+    geometry_adapter.display_zone=datetime.fromisoformat(observation['start']).tzinfo
+    planner=planners[0]
+    access={str(layer.stopIdForIndex.get(int(k))).split(':',1)[1]:v for k,v in planner._transit_access_paths[r5py.TransportMode.WALK].items()}
+    egress={str(layer.stopIdForIndex.get(int(k))).split(':',1)[1]:v for k,v in planner._transit_egress_paths[r5py.TransportMode.WALK].items()}
+    chosen=geometry_adapter.segments(planner,observation,ready,origin,destination,access,egress)
+    families[primary_family]=dict(route_family=family(observation.get('rides',[])),duration_seconds=observation['duration_seconds'],
+        walking_seconds=observation['walking_seconds'],waiting_seconds=observation['waiting_seconds'],
+        fixed_slack_seconds=observation['fixed_slack_seconds'],transfers=observation['transfers'],segments=chosen,
+        source='selected independent sweep; R5 street/hop geometry',timing_validation=itinerary_timing(chosen,observation['start']))
     options=sorted(families.values(),key=lambda o:(o['duration_seconds'],o['walking_seconds'],
                                                   o['route_family']['id']!=primary_family,o['route_family']['id']))
     features=[]

@@ -1,5 +1,8 @@
 # Checkpoint inför sleep
 
+Senaste läge: [CHECKPOINT_PLANNER.md](CHECKPOINT_PLANNER.md). Den historiska
+sleep-checkpointen nedan och ursprungliga N−1-resultat är bevarade.
+
 **Återupptaget och slutkontrollerat 2026-10-12.** Checkpointen nedan är
 historisk. 65 tester och kontroll av alla sex sparade artefakter passerade;
 routingkod och indata var oförändrade och fullkörningarna upprepades inte.

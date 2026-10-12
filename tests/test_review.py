@@ -23,12 +23,12 @@ class ReviewTests(unittest.TestCase):
                     date='2026-10-12',start='07:00',window_minutes=60,timezone='Europe/Stockholm')
 
     def test_invalid_coordinates_and_window(self):
-        for key,value in [('from_lat',float('nan')),('from_lat',91),('to_lon',True),('window_minutes',1.5),('start','07:00:01')]:
+        for key,value in [('from_lat',float('nan')),('from_lat',91),('to_lon',True),('window_minutes',1.5),('window_minutes',121),('max_rides',5),('max_rides',True),('start','07:00:01')]:
             with self.subTest(key=key),self.assertRaises(ValueError):normalize(dict(self.request(),**{key:value}))
 
     def test_input_identity_changes_for_each_routing_input(self):
         req=normalize(self.request());original=digest(req)
-        for key,value in [('from_lat',55.68),('to_lon',13.19),('date','2026-10-13'),('start','07:01'),('window_minutes',59),('timezone','UTC')]:
+        for key,value in [('from_lat',55.68),('to_lon',13.19),('date','2026-10-13'),('start','07:01'),('window_minutes',59),('timezone','UTC'),('max_rides',4)]:
             self.assertNotEqual(original,digest(normalize(dict(self.request(),**{key:value}))))
         self.assertEqual(req,normalize(dict(self.request(),start='07:00:00')))
 
@@ -43,6 +43,28 @@ class ReviewTests(unittest.TestCase):
         self.assertIsNone(cached_detail(report,'a',1))
         for index in [-1,3,True,'0']:
             with self.assertRaises(ValueError):cached_detail(report,'a',index)
+
+    def test_unsupported_nminus_day_and_dst_are_explicit_before_worker(self):
+        for instant,seconds in [('2026-10-12T23:00:00+02:00',82800),('2026-10-25T07:00:00+01:00',25200)]:
+            review=Review.__new__(Review)
+            review.reports={'a':dict(metadata=dict(start_minutes=[instant],parameters=dict(feed_timezone='Europe/Stockholm',max_time_seconds=2700)),minute_observations=[dict(start_seconds=seconds,rides=[{}])])}
+            self.assertEqual(review.nminus('a')['status'],'UNSUPPORTED_WINDOW')
+
+    def test_baseline_horizon_cannot_silently_cross_feed_day(self):
+        review=Review.__new__(Review)
+        review.hashes={'osm':{'sha256':'47942e06ea6c96c8893933f71f448f7e1deac9d906c216a16c60a414db521b9d'}}
+        review.area=None;review.coverage={'feed_timezone':'Europe/Stockholm'}
+        request=dict(self.request(),start='23:40',window_minutes=1)
+        self.assertEqual(review.analyze(request)['status'],'UNSUPPORTED_WINDOW')
+
+    def test_pure_walk_does_not_require_two_hour_transit_horizon(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for instant,seconds in [('2026-10-12T23:00:00+02:00',82800),('2026-10-25T07:00:00+01:00',25200)]:
+                review=Review.__new__(Review);review.output=Path(folder);review.nminus_engine='test'
+                review.reports={'walk':dict(metadata=dict(start_minutes=[instant],parameters=dict(feed_timezone='Europe/Stockholm',max_time_seconds=2700)),minute_observations=[dict(start_seconds=seconds,rides=[])])}
+                review.worker_task=lambda *args:dict(status='ALLOWED')
+                with patch('review_server.PRESETS',()):
+                    self.assertEqual(review.nminus('walk')['status'],'ALLOWED')
 
     def test_loopback_http_exposes_only_whitelisted_files(self):
         review=SimpleNamespace(presets=[],jobs={},reports={})

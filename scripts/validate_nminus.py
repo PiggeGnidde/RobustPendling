@@ -22,20 +22,24 @@ def main():
         checks={}
         inputs=paths(args.config)
         current_inputs={key:fingerprint(inputs[key]) for key in ('osm','gtfs')}
+        legacy=json.loads((ROOT/'scripts/legacy_regressions.json').read_text(encoding='utf-8'))
         for case in ([args.case] if args.case else ['lomma_lund','malmo_varnhem','gunnesbo_ideon']):
             base=json.loads((ROOT/'outputs'/f'phase2c_{case}_1.json').read_text(encoding='utf-8'))
             results=[json.loads((out/f'{case}_{i+1}.json').read_text(encoding='utf-8')) for i in range(args.repeat)]
             for result in results:
+                archived=result.get('canonical_sha256')==legacy['nminus_checksums'].get(case) and result.get('analysis_id')==legacy['analysis_identities'].get(case)
                 hashes=result['input_hashes']
                 if hashes['osm']!=current_inputs['osm'] or hashes['gtfs_original']!=current_inputs['gtfs']:
                     raise ValueError('Saved N−1 inputs differ from current inputs')
                 for name,value in result['code_hashes'].items():
-                    if fingerprint(ROOT/'scripts'/name)!=value:
+                    if fingerprint(ROOT/'scripts'/name)!=value and not archived:
                         raise ValueError('Saved N−1 routing code differs: '+name)
             checks[case]=[validate_result(r,base) for r in results]
             if len(results)==2 and results[0]!=results[1]:raise ValueError('Repeated result differs')
             if len(results)==2 and (out/f'{case}_1.geojson').read_bytes()!=(out/f'{case}_2.geojson').read_bytes():raise ValueError('Repeated GeoJSON differs')
-        atomic_json(out/'contract_checks.json',checks)
+        destination=ROOT/'outputs/planner/archive_checks.json'
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        atomic_json(destination,checks)
         print(json.dumps(checks),flush=True);return
     summaries={};started=time.perf_counter()
     stderr_path=out/'worker.stderr.log';stdout_path=out/'worker.stdout.log'

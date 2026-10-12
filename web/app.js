@@ -24,20 +24,32 @@ function clearTrip(){selection++;$('trip').hidden=true;$('legs').replaceChildren
 function invalidate(){
   generation++;clearTrip();analysis=null;analysisId=null;nminus=null;nminusPending=null;
   $('scenario').value='base';$('results').hidden=true;
+  $('deadline-results').hidden=true;$('deadline-choices').replaceChildren();
+  syncPicker();
   status('Indata ändrade – kör analysen för att granska den nya resan.');
 }
 form.addEventListener('input',invalidate);
-function fill(request){for(const[key,value]of Object.entries(request))form.elements.namedItem(key).value=value;}
-function read(){const request=Object.fromEntries(new FormData(form));for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes'])request[key]=Number(request[key]);return request;}
+function fill(request){for(const[key,value]of Object.entries(request))form.elements.namedItem(key).value=value;syncPicker();}
+function syncPicker(){
+  window.ReviewMap.setPickerPoints(['from','to'].map(endpoint=>({endpoint,lat:parseFloat(form.elements.namedItem(endpoint+'_lat').value),lon:parseFloat(form.elements.namedItem(endpoint+'_lon').value)})));
+}
+function read(){const request=Object.fromEntries(new FormData(form));delete request.analysis_mode;delete request.deadline;for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes','max_rides'])request[key]=Number(request[key]);return request;}
+form.elements.analysis_mode.addEventListener('change',()=>{$('deadline-label').hidden=form.elements.analysis_mode.value!=='deadline';});
+$('open-picker').addEventListener('click',()=>window.ReviewMap.pick((endpoint,lat,lon)=>{
+  form.elements.namedItem(endpoint+'_lat').value=lat.toFixed(6);form.elements.namedItem(endpoint+'_lon').value=lon.toFixed(6);
+  form.elements.namedItem(endpoint+'_name').value=endpoint==='from'?'A':'B';
+  invalidate();$('pick-status').textContent=`${endpoint==='from'?'A':'B'}: ${lat.toFixed(6)}, ${lon.toFixed(6)}. Kör analysen med de nya punkterna.`;
+}));
 async function run(request,presetId){
   invalidate();const token=generation;status('Läser analys…');
   try{
     let value=presetId?await api('/api/results/'+presetId):await api('/api/analyze',request);
     value=await resolveJob(value,()=>token===generation);if(token!==generation||!value)return;
-    if(value.status!=='OK')throw new Error(value.status+': '+value.message);
+    if(value.status!=='OK')throw new Error(value.status+': '+(value.message||'Analysen kunde inte verifieras. Se den lokala körloggen.'));
     analysis=value.report;analysisId=value.analysis_id;render();
     status('Verifierad basanalys · '+analysis.minute_observations.length+' startminuter');
     selectMinute(analysis.departure_jumps[0]?.before_index??0);
+    if(form.elements.analysis_mode.value==='deadline')runDeadline(token);
   }catch(error){if(token===generation)status(error.message,true);}
 }
 form.addEventListener('submit',event=>{event.preventDefault();run(read());});
@@ -45,6 +57,11 @@ function metric(parent,label,value){const node=text('div','',parent,'metric');te
 function render(){
   const params=analysis.metadata.parameters,m=analysis.metrics;$('results').hidden=false;
   $('relation').textContent=`${params.origin.name} → ${params.destination.name} · ${analysis.metadata.date}`;
+  $('parameters').textContent=`Gång ${params.walk_speed_kmh} km/h · högst ${params.max_walk_seconds/60} min gång totalt · basresa högst ${params.max_time_seconds/60} min · högst ${params.max_rides} trafikben · boarding >${params.board_slack_seconds} s · reservhorisont 120 min efter besked`;
+  $('scenario').replaceChildren();
+  for(const[value,label]of [['base','Basfall'],['combined','Samlat N−1: värsta enskilda bortfall'],...Array.from({length:params.max_rides},(_,i)=>[String(i+1),`Ben ${i+1} uteblir`])]){
+    const node=text('option',label,$('scenario'));node.value=value;
+  }
   $('metrics').replaceChildren();
   for(const p of ['T50','T90','T99'])metric($('metrics'),p+'_schedule',typeof m.percentiles_seconds[p]==='number'?duration(m.percentiles_seconds[p]):'Ej nåbar');
   for(const[label,key]of [['buffer_90','buffer_90'],['buffer_99','buffer_99'],['Full range','full_range']])metric($('metrics'),label,typeof m[key]==='number'?duration(m[key]):'Ej nåbar');
@@ -82,7 +99,16 @@ async function scenarioChanged(){
 $('scenario').addEventListener('change',scenarioChanged);
 function renderScenarioSummary(){
   const key=scenario(),visible=key!=='base'&&nminus;$('nminus-summary').hidden=!visible;$('nminus-notice').hidden=!visible;if(!visible)return;
-  const s=nminus.summaries[key];$('nminus-metrics').replaceChildren();$('nminus-heading').textContent=`Ben ${key} uteblir${s.conditional?' · kvantiler villkorade på nåbarhet':''}`;
+  $('nminus-metrics').replaceChildren();
+  if(key==='combined'){
+    const s=nminus.combined.summary;$('nminus-heading').textContent='Samlat N−1 över varje startminut';
+    for(const p of ['T50','T90','T99'])metric($('nminus-metrics'),p,typeof s.percentiles_seconds[p]==='number'?duration(s.percentiles_seconds[p]):'Ej nåbar');
+    metric($('nminus-metrics'),'Alla bortfall har reserv',(s.all_failures_covered_share*100).toFixed(1)+' %');
+    metric($('nminus-metrics'),'Ej nåbara minuter',s.unreachable_count);
+    metric($('nminus-metrics'),'Utan trafikben',s.no_transit_leg_count);
+    $('nminus-population').textContent='Största totalrestiden bland separata bortfall av den valda basresans trafikben. Ej nåbart räknas som +∞ i kvantilerna. Ren gång använder basrestiden. Basresan optimeras inte för robusthet.';return;
+  }
+  const s=nminus.summaries[key];$('nminus-heading').textContent=`Ben ${key} uteblir${s.conditional?' · kvantiler villkorade på nåbarhet':''}`;
   for(const p of ['T50','T90','T99'])metric($('nminus-metrics'),p+' total',duration(s.total_percentiles_seconds[p]));
   for(const p of ['P50','P90'])metric($('nminus-metrics'),p+' extra',duration(s.extra_percentiles_seconds[p]));
   metric($('nminus-metrics'),'Max extra',duration(s.maximum_extra_seconds));
@@ -91,7 +117,7 @@ function renderScenarioSummary(){
 }
 function svgNode(tag,attrs,parent){const node=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[key,value]of Object.entries(attrs))node.setAttribute(key,value);parent.append(node);return node;}
 function drawCurve(){
-  const svg=$('curve');svg.replaceChildren();const rows=analysis.minute_observations,key=scenario(),scenarios=nminus&&key!=='base'?nminus.scenarios[key]:null;
+  const svg=$('curve');svg.replaceChildren();const rows=analysis.minute_observations,key=scenario(),scenarios=nminus&&key!=='base'?(key==='combined'?nminus.combined.minute_observations:nminus.scenarios[key]):null;
   const values=rows.map(r=>r.duration_seconds).concat(scenarios?scenarios.map(r=>r.total_seconds??null):[]).filter(v=>typeof v==='number');
   const high=Math.max(300,Math.ceil(Math.max(...values,0)/600)*600),x=i=>65+i*865/Math.max(rows.length-1,1),y=v=>230-v*200/high;
   for(let v=0;v<=high;v+=high>3600?900:600){svgNode('line',{x1:65,x2:930,y1:y(v),y2:y(v),stroke:'#e1e9ec'},svg);svgNode('text',{x:6,y:y(v)+4},svg).textContent=duration(v);}
@@ -113,7 +139,17 @@ async function selectMinute(index){
   $('detail-status').classList.remove('error');$('detail-status').textContent='Hämtar resa '+clock(analysis.minute_observations[index].start)+'…';
   try{
     if(key!=='base'){
-      const data=await ensureNMinus();if(!data||token!==selection||gen!==generation||key!==scenario())return;showScenario(data.scenarios[key][index],index);return;
+      const data=await ensureNMinus();if(!data||token!==selection||gen!==generation||key!==scenario())return;
+      if(key==='combined'){
+        const row=data.combined.minute_observations[index];
+        if(row.status==='NO_TRANSIT_LEGS'){
+          $('detail-status').textContent='Utan trafikben: inget turbortfall; samlat mått är basrestiden.';
+          const base=data.base_itineraries[index];showBase({segments:base,duration_seconds:row.total_seconds,walking_seconds:row.total_seconds,waiting_seconds:0,transfers:0},index);return;
+        }
+        if(row.status==='BASE_UNREACHABLE')throw new Error('Basresan är ej nåbar; samlat N−1 är ej nåbart.');
+        showScenario(data.scenarios[String(row.worst_leg)][index],index);return;
+      }
+      showScenario(data.scenarios[key][index],index);return;
     }
     let result=await api('/api/detail',{analysis_id:id,index});result=await resolveJob(result,()=>token===selection&&gen===generation);
     if(!result||token!==selection||gen!==generation)return;if(result.analysis_id!==id||result.index!==index)throw new Error('Resans identitet matchar inte valet.');
@@ -135,12 +171,13 @@ function showBase(option,index){
   const obs=analysis.minute_observations[index];$('trip-title').textContent='Basresa · '+clock(obs.start);
   const summary=text('div','',$('trip-summary'),'summary');
   for(const value of [`Totalt ${duration(option.duration_seconds)}`,`Gång ${duration(option.walking_seconds)}`,`Väntan ${duration(option.waiting_seconds)}`,`${option.transfers} byten`,`Ankomst ${clock(option.segments.at(-1).arrival)}`])text('strong',value,summary);
+  if(option.segments.every(leg=>leg.mode==='WALK'))text('p','Utan trafikben – inget turbortfall. Samlat N−1 använder basrestiden.',$('trip-summary'));
   legList(option.segments,$('legs'),'Basresa');$('trip').hidden=false;
   window.ReviewMap.render({base:option.segments,completed:[],reserve:[],origin:analysis.metadata.parameters.origin,destination:analysis.metadata.parameters.destination});
 }
 function showScenario(row,index){
   const start=analysis.minute_observations[index].start,base=nminus.base_itineraries[index]||[];
-  $('trip-title').textContent=`N−1 ben ${scenario()} · start ${clock(start)}`;
+  $('trip-title').textContent=`N−1 ben ${row.leg_number||scenario()} · start ${clock(start)}`;
   if(row.status==='NOT_APPLICABLE'){
     $('detail-status').textContent='Ej tillämpligt · '+(row.reason==='BASE_UNREACHABLE'?'basresan är ej nåbar':'basresan saknar detta trafikben');
     text('p','Detta är inte ett misslyckat scenario och ingår inte i scenariots kvantiler.',$('trip-summary'));legList(base,$('legs'),'Basresa · inget sådant felscenario');
@@ -158,8 +195,29 @@ function showScenario(row,index){
   window.ReviewMap.render({base,completed:row.completed?.segments||[],reserve:row.reserve?.segments||[],notification:row.notification,origin:analysis.metadata.parameters.origin,destination:analysis.metadata.parameters.destination});
 }
 $('map-reset').addEventListener('click',()=>window.ReviewMap.reset());
+async function runDeadline(token){
+  const id=analysisId;$('deadline-results').hidden=false;$('deadline-status').textContent='Prövar deadline för alla startminuter och enskilda bortfall…';
+  try{
+    let value=await api('/api/deadline',{analysis_id:id,deadline:form.elements.deadline.value});
+    value=await resolveJob(value,()=>token===generation);if(!value||token!==generation||id!==analysisId)return;
+    if(value.status!=='OK')throw new Error(value.message||value.status);
+    $('deadline-choices').replaceChildren();$('deadline-status').textContent=`Deadline ${clock(value.deadline)} · ${value.start_minutes_checked} exakta startminuter prövade.`;
+    for(const[key,label]of [['baseline','Basfall'],['all_single_failures','Varje enskilt turbortfall']]){
+      const choice=value[key];if(!choice){text('p',label+': ingen startminut inom intervallet klarar kravet.',$('deadline-choices'));continue;}
+      const button=text('button',`${label}: senaste start ${clock(choice.start)}, ankomst ${clock(choice.arrival)}`,$('deadline-choices'));
+      button.addEventListener('click',async()=>{
+        $('scenario').value=key==='baseline'?'base':'combined';$('minute').value=choice.index;await scenarioChanged();
+      });
+    }
+  }catch(error){if(token===generation)$('deadline-status').textContent=error.message;}
+}
 api('/api/presets').then(value=>{
   const p=value.parameters;$('parameters').textContent=`Gång ${p.walk_speed_kmh} km/h · högst ${p.max_walk_seconds/60} min gång totalt · basresa högst ${p.max_time_seconds/60} min · högst ${p.max_rides} trafikben · boarding >${p.board_slack_seconds} s · slutmarginal ${p.egress_slack_seconds} s`;
+  if(value.coverage){const format=v=>v.slice(0,4)+'-'+v.slice(4,6)+'-'+v.slice(6);$('coverage').textContent=`Fryst tidtabell: ${format(value.coverage.first)}–${format(value.coverage.last)}. OSM: lon 12.95–13.30, lat 55.60–55.80. Börja med 1–5 minuter; högst 120 minuter per anrop.`;}
   for(const preset of value.presets){const button=text('button',preset.label,$('presets'));button.addEventListener('click',()=>{fill(preset.request);run(preset.request,preset.id);});}
-  if(value.presets.length){fill(value.presets[0].request);run(value.presets[0].request,value.presets[0].id);}else status('Ange koordinater och kör analys.');
+  if(value.presets.length&&generation===0){
+    fill(value.presets[0].request);
+    if(value.presets[0].id)run(value.presets[0].request,value.presets[0].id);
+    else status('Ange punkter eller välj ett förval och klicka Analysera. Börja med ett litet intervall.');
+  }else if(generation===0)status('Ange koordinater och kör analys.');
 }).catch(error=>status(error.message,true));

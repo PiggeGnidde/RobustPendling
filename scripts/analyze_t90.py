@@ -20,6 +20,7 @@ from transit_inputs import ROOT, paths, fingerprint, atomic_json
 from smoke_helpers import gtfs_tables, select_station, routing_feed
 from t90_core import PARAMETERS, minute_grid, statistics, metadata, combinations, component_statistics
 from schedule_sweep import ScheduleSweep, load_trips
+from planner_core import routing_parameters,service_coverage,date_check
 from analysis_contract import (SCHEMA_VERSION,point,request_grid,area_check,family,
                                structural_metrics,representatives,validate_geojson,
                                positive_jumps,audited_representatives)
@@ -40,6 +41,8 @@ def parser():
     p.add_argument('--audit-jumps',type=int,choices=range(4),default=0,
                    help='Detail both sides of the largest 0 to 3 adjacent increases')
     p.add_argument('--output', type=Path, default=ROOT/'outputs/t90_schedule_lomma_lund.json')
+    p.add_argument('--max-rides',type=int,choices=range(1,5),default=2)
+    p.add_argument('--planner',action='store_true',help='Skip redundant native/matrix diagnostics; exact R5 comparison remains')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--artifact-prefix',help=argparse.SUPPRESS)
     return p
@@ -51,7 +54,10 @@ def empty_response(status,message,meta=None,area=None):
                 route_families=[],alternatives=[],geojson_path=None)
 
 
-def worker(args, grid):
+def worker(args, grid, reused_network=None):
+    parameters=routing_parameters(args.max_rides)
+    source_names=('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py','planner_core.py','nminus_core.py','nminus_engine.py')
+    initial_code={name:fingerprint(ROOT/'scripts'/name) for name in source_names}
     inputs = paths(args.config)
     initial_hashes = dict(osm=fingerprint(inputs['osm']),gtfs=fingerprint(inputs['gtfs']))
     requested_grid=grid
@@ -71,7 +77,7 @@ def worker(args, grid):
     except ValueError as error:
         atomic_json(args.output,empty_response('INVALID_REQUEST',str(error)));return
     early_meta=metadata(initial_hashes,dict(python=sys.version.split()[0],r5py='NOT_STARTED',r5='NOT_STARTED'),
-                        requested_grid,dict(PARAMETERS,origin=origin,destination=destination,
+                        requested_grid,dict(parameters,origin=origin,destination=destination,
                                             network_area=area,window_minutes=len(grid),schema_version=SCHEMA_VERSION))
     if area['status']!='OK':
         atomic_json(args.output,empty_response(area['status'],'Points must be within verified extraction coverage',early_meta,area));return
@@ -82,8 +88,11 @@ def worker(args, grid):
         atomic_json(args.output,empty_response('UNSUPPORTED_FEED','A single agency timezone is required',early_meta,area));return
     feed_timezone=agency_zones.pop()
     grid=[t.astimezone(ZoneInfo(feed_timezone)) for t in grid]
-    if any(t.date()!=grid[0].date() or t.utcoffset()!=t.replace(fold=1).utcoffset() for t in grid) or (grid[-1]+timedelta(minutes=45)).utcoffset()!=grid[0].utcoffset():
+    if any(t.date()!=grid[0].date() or t.utcoffset()!=t.replace(fold=1).utcoffset() for t in grid) or (grid[-1]+timedelta(minutes=45)).date()!=grid[0].date() or (grid[-1]+timedelta(minutes=45)).utcoffset()!=grid[0].utcoffset():
         atomic_json(args.output,empty_response('UNSUPPORTED_WINDOW','Feed-day crossing or DST transition is not yet supported',early_meta,area));return
+    supported=date_check(service_coverage(inputs['gtfs']),grid[0].date().isoformat())
+    if supported['status']!='OK':
+        atomic_json(args.output,empty_response(supported['status'],supported['message'],early_meta,area));return
     os.environ['JAVA_HOME'] = str(Path(sys.prefix)/'Library/lib/jvm')
     os.environ['LOCALAPPDATA'] = str(ROOT/'cache/runtime')
     os.environ['APPDATA'] = str(ROOT/'cache/config')
@@ -91,11 +100,11 @@ def worker(args, grid):
     temporary = ROOT/'cache/tmp'
     temporary.mkdir(parents=True,exist_ok=True)
     os.environ['TEMP'] = os.environ['TMP'] = str(temporary)
-    sys.argv = [sys.argv[0], '--max-memory', PARAMETERS['jvm_heap'], '--verbose']
+    sys.argv = [sys.argv[0], '--max-memory', parameters['jvm_heap'], '--verbose']
     import r5py
     import jpype
     from jvm_diagnostics import instrument_shutdown
-    instrument_shutdown()
+    if reused_network is None:instrument_shutdown()
     from r5py.r5.regional_task import RegionalTask
     from r5py.r5.trip_planner import TripPlanner
     from r5_adapter import dominating_factory
@@ -107,12 +116,12 @@ def worker(args, grid):
     derived.parent.mkdir(parents=True,exist_ok=True)
     derivation = routing_feed(inputs['gtfs'],derived)
     started = time.perf_counter()
-    network = r5py.TransportNetwork(inputs['osm'],[derived])
+    network = reused_network or r5py.TransportNetwork(inputs['osm'],[derived])
     build_seconds = time.perf_counter()-started
     request = RegionalTask(network, departure=grid[0], departure_time_window=timedelta(hours=1),
                           transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
                           speed_walking=3.6, max_time=timedelta(seconds=2700),
-                          max_time_walking=timedelta(seconds=900), max_public_transport_rides=2)
+                          max_time_walking=timedelta(seconds=900), max_public_transport_rides=parameters['max_rides'])
     task = request._regional_task
     task.fromLat,task.fromLon = origin['lat'],origin['lon']
     task.toLat,task.toLon = destination['lat'],destination['lon']
@@ -123,7 +132,7 @@ def worker(args, grid):
     def walking(paths_by_mode):
         return {ids[int(stop)]:round(leg.travel_time.total_seconds())
                 for paths in paths_by_mode.values() for stop,leg in paths.items()
-                if leg.travel_time.total_seconds() <= PARAMETERS['max_walk_seconds']}
+                if leg.travel_time.total_seconds() <= parameters['max_walk_seconds']}
     access = walking(planner._transit_access_paths)
     egress = walking(planner._transit_egress_paths)
     transfer_cache = {}
@@ -133,8 +142,8 @@ def worker(args, grid):
             if stop in indices:
                 pairs = layer.streetTransfers.get(indices[stop])
                 for pos in range(0,pairs.size(),2):
-                    duration = int(pairs.get(pos+1)/(PARAMETERS['walk_speed_kmh']/3.6*1000))
-                    if duration <= PARAMETERS['max_walk_seconds']:
+                    duration = int(pairs.get(pos+1)/(parameters['walk_speed_kmh']/3.6*1000))
+                    if duration <= parameters['max_walk_seconds']:
                         values[ids[int(pairs.get(pos))]] = duration
             transfer_cache[stop] = values
         return transfer_cache[stop]
@@ -142,7 +151,7 @@ def worker(args, grid):
     start_seconds = [t.hour*3600+t.minute*60 for t in grid]
     trips = load_trips(derived,grid[0],start_seconds[0],start_seconds[-1]+2700)
     direct_walk=min((round(t.travel_time.total_seconds()) for t in planner.direct_paths),default=None)
-    sweep = ScheduleSweep(trips,access,egress,transfers,direct_walk_seconds=direct_walk)
+    sweep = ScheduleSweep(trips,access,egress,transfers,parameters,direct_walk_seconds=direct_walk)
     started = time.perf_counter()
     observations = []
     for instant, seconds in zip(requested_grid,start_seconds):
@@ -175,7 +184,7 @@ def worker(args, grid):
     seed = next(s for s in range(1000) if (lambda r:r.nextInt(2)==1 and r.nextInt(2)==1)(rng_class(s)))
     def router(req):
         return router_class(network,req,access_java,egress_java,
-                            dominating_factory(layer,int(req.suboptimalMinutes)),None,True)
+                            dominating_factory(layer,int(req.suboptimalMinutes),parameters=parameters,ready=int(req.fromTime)+1),None,True)
     def state_result(state, ready):
         chain = []
         current = state
@@ -194,7 +203,7 @@ def worker(args, grid):
                     trip_id=str(pattern.tripSchedules.get(current.trip).tripId).split(':',1)[-1],
                     mode=str(info.route_type),start_stop=ids[int(previous.stop)],end_stop=ids[int(current.stop)],
                     departure_seconds=int(current.boardTime),arrival_seconds=int(current.time)))
-        duration = int(state.time)-ready+PARAMETERS['egress_slack_seconds']
+        duration = int(state.time)-ready+parameters['egress_slack_seconds']
         if not rides or walking_seconds>900 or duration>2700: return None
         return dict(duration_seconds=duration,walking_seconds=walking_seconds,rides=rides)
     comparisons = []
@@ -220,43 +229,45 @@ def worker(args, grid):
         comparisons.append(dict(start=row['start'],evaluated_seconds=keys,raw_r5_seconds=value,
                                 raw_best_rides=best['rides'] if best else [],
                                 explicit_seconds=row['duration_seconds'],equal=value==row['duration_seconds']))
+    minute_matrices=[];matrix_warnings=set();matrix_comparison=None;native_keys=[];selected=[]
     native = copy.copy(request)._regional_task
     # Do not use 60 draws for a shorter CLI window: R5 can otherwise create
     # zero-width random-walk steps. R5 also explicitly rejects 200 draws.
     native.fromTime,native.toTime,native.monteCarloDraws = start_seconds[0],start_seconds[-1]+60,min(len(grid),199)
-    engine = router(native)
-    selected = [int(t) for t in generator.invoke(engine,native)]
-    # generator mutates its RNG; reconstruct before the actual experiment.
-    engine = router(native); engine.route()
-    native_keys = sorted(int(k) for k in engine.finalStatesByDepartureTime.keys())
-    matrix_comparison = None
-    import geopandas as gpd
-    from shapely.geometry import Point
-    def frame(station):
-        return gpd.GeoDataFrame({'id':[station['id']]},geometry=[Point(station['lon'],station['lat'])],crs='EPSG:4326')
-    matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=grid[0],
-                 departure_time_window=timedelta(minutes=len(grid)),percentiles=[50,90,99],
-                 transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                 speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
-                 max_public_transport_rides=2)
-    import pandas as pd
-    matrix_comparison = json.loads(pd.DataFrame(matrix).to_json(orient='records'))
-    minute_matrices = []
-    matrix_warnings = set()
-    for instant,row in zip(grid,observations):
-        with warnings.catch_warnings(record=True) as captured:
-            warnings.simplefilter('always')
-            minute_matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=instant,
-                 departure_time_window=timedelta(minutes=1),percentiles=[50],
-                 transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                 speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
-                 max_public_transport_rides=2)
-            matrix_warnings.update(str(w.message) for w in captured)
-        result_minutes = json.loads(pd.DataFrame(minute_matrix).to_json(orient='records'))[0]['travel_time']
-        expected = ((row['duration_seconds']-row['fixed_slack_seconds'])//60) if row['duration_seconds'] is not None else None
-        minute_matrices.append(dict(start=instant.isoformat(),r5_matrix_minutes=result_minutes,
-                                     explicit_minus_egress_floor_minutes=expected,equal=result_minutes==expected))
-    frozen = dict(PARAMETERS,origin=origin,destination=destination,
+    if not args.planner:
+        engine = router(native)
+        selected = [int(t) for t in generator.invoke(engine,native)]
+        # generator mutates its RNG; reconstruct before the actual experiment.
+        engine = router(native); engine.route()
+        native_keys = sorted(int(k) for k in engine.finalStatesByDepartureTime.keys())
+        matrix_comparison = None
+        import geopandas as gpd
+        from shapely.geometry import Point
+        def frame(station):
+            return gpd.GeoDataFrame({'id':[station['id']]},geometry=[Point(station['lon'],station['lat'])],crs='EPSG:4326')
+        matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=grid[0],
+                     departure_time_window=timedelta(minutes=len(grid)),percentiles=[50,90,99],
+                     transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
+                     speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
+                     max_public_transport_rides=parameters['max_rides'])
+        import pandas as pd
+        matrix_comparison = json.loads(pd.DataFrame(matrix).to_json(orient='records'))
+        minute_matrices = []
+        matrix_warnings = set()
+        for instant,row in zip(grid,observations):
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter('always')
+                minute_matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=instant,
+                     departure_time_window=timedelta(minutes=1),percentiles=[50],
+                     transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
+                     speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
+                     max_public_transport_rides=parameters['max_rides'])
+                matrix_warnings.update(str(w.message) for w in captured)
+            result_minutes = json.loads(pd.DataFrame(minute_matrix).to_json(orient='records'))[0]['travel_time']
+            expected = ((row['duration_seconds']-row['fixed_slack_seconds'])//60) if row['duration_seconds'] is not None else None
+            minute_matrices.append(dict(start=instant.isoformat(),r5_matrix_minutes=result_minutes,
+                                         explicit_minus_egress_floor_minutes=expected,equal=result_minutes==expected))
+    frozen = dict(parameters,origin=origin,destination=destination,
                   r5_suboptimal_minutes=int(task.suboptimalMinutes),
                   window_start=args.start,window_end_inclusive=(requested_grid[-1]+timedelta(seconds=59)).isoformat(),
                   window_minutes=len(grid),network_area=area,schema_version=SCHEMA_VERSION,
@@ -264,13 +275,12 @@ def worker(args, grid):
                   allow_pure_walk=True,geometry_crs='EPSG:4326',
                   audit_jumps=args.audit_jumps,
                   r5_permission_adapter='filter_before_dominance_pruning',
-                  sweep='exhaustive_one_or_two_rides_on_R5_walking_links',
+                  sweep='independent_bounded_1_to_4_rides_on_R5_walking_links',
                   exact_r5_adapter_seed=seed, exact_r5_interval_seconds=2)
     frozen['native_diagnostic_draws'] = int(native.monteCarloDraws)
     hashes = dict(osm=fingerprint(inputs['osm']),gtfs_original=fingerprint(inputs['gtfs']),
                   gtfs_derived=fingerprint(derived),r5_jar=fingerprint(jar),
-                  code={name:fingerprint(ROOT/'scripts'/name) for name in
-                        ('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py')})
+                  code={name:fingerprint(ROOT/'scripts'/name) for name in source_names})
     if initial_hashes != dict(osm=hashes['osm'],gtfs=hashes['gtfs_original']):
         raise RuntimeError('Input changed during the experiment; no result published')
     versions = dict(python=sys.version.split()[0],r5py=r5py.__version__,r5='7.5.1-r5py',
@@ -288,7 +298,7 @@ def worker(args, grid):
         calls+=1
         item,geo=collect(network,origin,destination,role,row,grid[index],{t['id']:t for t in trips},
                          {s['stop_id']:s['stop_name'] for s in stops},
-                         {s['stop_id']:(float(s['stop_lon']),float(s['stop_lat'])) for s in stops})
+                         {s['stop_id']:(float(s['stop_lon']),float(s['stop_lat'])) for s in stops},parameters=parameters)
         representative_itineraries.append(item);features.extend(geo)
         for option in item['options']:
             f=option['route_family'];registry.setdefault(f['id'],dict(**f,selected_count=0))
@@ -308,6 +318,8 @@ def worker(args, grid):
     if initial_hashes != dict(osm=fingerprint(inputs['osm']),gtfs=fingerprint(inputs['gtfs'])):
         raise RuntimeError('Input changed during itinerary collection; no result published')
     matches=all(r['matches_sweep'] is not False for r in representative_itineraries)
+    if any(fingerprint(ROOT/'scripts'/name)!=value for name,value in initial_code.items()):
+        raise RuntimeError('Routing code changed during analysis; no result published')
     exact_matches=all(c['equal'] for c in comparisons)
     report = dict(schema_version=SCHEMA_VERSION,status=('REPRESENTATIVE_MISMATCH' if not matches else
                   'ROUTING_MISMATCH' if not exact_matches else 'OK'),
@@ -365,7 +377,8 @@ def main():
         command = [sys.executable,'-B',str(Path(__file__).resolve()),'--worker','--config',str(args.config.resolve()),
                    '--date',args.date,'--start',args.start,'--window-minutes',str(len(grid)),'--timezone',args.timezone,
                    '--output',str(work_result),'--artifact-prefix',args.output.stem]
-        command.extend(['--audit-jumps',str(args.audit_jumps)])
+        command.extend(['--audit-jumps',str(args.audit_jumps),'--max-rides',str(args.max_rides)])
+        if args.planner:command.append('--planner')
         for endpoint in ('from','to'):
             for field in ('lat','lon','name'):
                 value=getattr(args,f'{endpoint}_{field}')

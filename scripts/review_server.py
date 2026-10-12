@@ -19,6 +19,8 @@ from jvm_diagnostics import cleanup_after_exit
 from smoke_helpers import gtfs_tables
 from validate_phase2c import CASES
 from nminus_validation import validate_result
+from nminus_core import HORIZON_SECONDS
+from planner_core import routing_parameters,service_coverage,date_check,combined_nminus,deadline_result
 
 PRESETS=('lomma_lund','malmo_varnhem','gunnesbo_ideon')
 
@@ -46,12 +48,14 @@ def normalize(data):
         result.update({prefix+'_'+k:p[k] for k in ('lat','lon','name')})
     grid=request_grid(data['date'],data['start'],data['window_minutes'],data['timezone'])
     result.update(date=data['date'],start=grid[0].time().isoformat(),window_minutes=len(grid),timezone=data['timezone'])
+    result['max_rides']=routing_parameters(data.get('max_rides',2))['max_rides']
+    if len(grid)>120:raise ValueError('Local planner allows at most 120 start minutes per request')
     return result
 
 
 def request_from_report(report):
     meta=report['metadata']; p=meta['parameters']; first=meta['start_minutes'][0]
-    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'])
+    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'],max_rides=p['max_rides'])
     for prefix,key in [('from','origin'),('to','destination')]:
         result.update({prefix+'_'+k:p[key][k] for k in ('lat','lon','name')})
     return normalize(result)
@@ -72,16 +76,19 @@ class Review:
         self.config=config; self.inputs=paths(config)
         self.hashes={k:fingerprint(self.inputs[k]) for k in ('osm','gtfs')}
         self.area=tomllib.loads(config.read_text(encoding='utf-8')).get('network_area')
+        self.coverage=service_coverage(self.inputs['gtfs'])
+        self.legacy=json.loads((ROOT/'scripts/legacy_regressions.json').read_text(encoding='utf-8'))['analysis_identities']
+        self.legacy_nminus=json.loads((ROOT/'scripts/legacy_regressions.json').read_text(encoding='utf-8'))['nminus_checksums']
         self.reports={};self.files={};self.presets=[];self.jobs={};self.pool=ThreadPoolExecutor(max_workers=2)
         self.lock=threading.Lock();self.analysis_lock=threading.Lock();self.process=None;self.log=None
         self.output=ROOT/'outputs/review';self.output.mkdir(parents=True,exist_ok=True)
-        self.engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('review_detail_worker.py','detailed_routes.py','r5_adapter.py')})
-        self.nminus_engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_engine.py','nminus_core.py','review_detail_worker.py','schedule_sweep.py')})
+        self.engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('review_detail_worker.py','detailed_routes.py','r5_adapter.py','nminus_core.py','nminus_engine.py')})
+        self.nminus_engine=digest({name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_engine.py','nminus_core.py','review_detail_worker.py','schedule_sweep.py','planner_core.py','nminus_validation.py','r5_adapter.py')})
         for name in PRESETS:
             path=ROOT/'outputs'/f'phase2c_{name}_1.json'
             if not path.exists():
                 stops={s['stop_id']:s for s in gtfs_tables(self.inputs['gtfs'])[0]}
-                req=dict(date='2026-10-12',start='07:00:00',window_minutes=60,timezone='Europe/Stockholm')
+                req=dict(date='2026-10-12',start='07:00:00',window_minutes=5,timezone='Europe/Stockholm',max_rides=2)
                 for prefix,stop_id in zip(('from','to'),CASES[name]):
                     stop=stops[stop_id]
                     req.update({prefix+'_lat':float(stop['stop_lat']),prefix+'_lon':float(stop['stop_lon']),prefix+'_name':stop['stop_name']})
@@ -97,9 +104,11 @@ class Review:
     def verify(self,report):
         meta=report['metadata'];h=meta['input_hashes']
         if report['status']!='OK' or h['osm']!=self.hashes['osm'] or h['gtfs_original']!=self.hashes['gtfs']:raise ValueError('Analysis or inputs not verified')
-        if any(meta['parameters'].get(k)!=v for k,v in PARAMETERS.items()):raise ValueError('Routing parameters differ')
+        if any(meta['parameters'].get(k)!=v for k,v in routing_parameters(meta['parameters']['max_rides']).items()):raise ValueError('Routing parameters differ')
         if meta['versions']['r5py']!='1.1.7':raise ValueError('Unverified engine version')
-        for name in ('detailed_routes.py','r5_adapter.py','schedule_sweep.py','analysis_contract.py','t90_core.py'):
+        identity=digest(dict(metadata=meta,metrics=report['metrics'],minutes=report['minute_observations']))
+        if identity in self.legacy.values():return
+        for name in ('detailed_routes.py','r5_adapter.py','schedule_sweep.py','analysis_contract.py','t90_core.py','planner_core.py','nminus_core.py','nminus_engine.py'):
             if fingerprint(ROOT/'scripts'/name)!=h['code'][name]:raise ValueError('Saved analysis engine differs; regenerate analysis')
 
     def register(self,report,path):
@@ -122,25 +131,23 @@ class Review:
         req=normalize(data)
         area=area_check(point(req['from_lat'],req['from_lon']),point(req['to_lat'],req['to_lon']),self.hashes['osm']['sha256'],self.area)
         if area['status']!='OK':return dict(status=area['status'],message='Punkterna måste ligga inom OSM-området 12.95–13.30 / 55.60–55.80.')
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+        if not self.coverage['feed_timezone']:return dict(status='UNSUPPORTED_FEED',message='Feeden behöver en entydig trafik-tidszon.')
+        grid=[t.astimezone(ZoneInfo(self.coverage['feed_timezone'])) for t in request_grid(req['date'],req['start'],req['window_minutes'],req['timezone'])]
+        last=grid[-1]+timedelta(seconds=PARAMETERS['max_time_seconds'])
+        if last.date()!=grid[0].date() or grid[-1].date()!=grid[0].date() or last.utcoffset()!=grid[0].utcoffset():
+            return dict(status='UNSUPPORTED_WINDOW',message='Basresans sökhorisont passerar trafikdygn eller tidsomställning. Välj ett tidigare avreseintervall.')
+        supported=date_check(self.coverage,grid[0].date().isoformat())
+        if supported['status']!='OK':return supported
         for identity,report in list(self.reports.items()):
             if request_from_report(report)==req:return dict(status='OK',analysis_id=identity,report=report)
-        key=digest(dict(request=req,hashes=self.hashes,parameters=PARAMETERS))
+        engine={name:fingerprint(ROOT/'scripts'/name) for name in ('analyze_t90.py','planner_core.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','t90_core.py','analysis_contract.py','review_detail_worker.py','nminus_core.py','nminus_engine.py')}
+        key=digest(dict(request=req,hashes=self.hashes,parameters=PARAMETERS,engine=engine))
         path=self.output/f'analysis-{key}.json'
-        command=[sys.executable,'-B',str(ROOT/'scripts/analyze_t90.py'),'--config',str(self.config),'--output',str(path),'--audit-jumps','3']
-        for k,v in req.items():command.extend(['--'+k.replace('_','-'),str(v)])
-        def run():
-            with (self.output/f'analysis-{key}.log').open('w',encoding='utf-8') as log:
-                exit_code=run_analysis(command,log)
-            if not path.exists():raise RuntimeError('No analysis result')
-            report=json.loads(path.read_text(encoding='utf-8'))
-            if report['status']!='OK':return dict(status=report['status'],message=report.get('message','Analysen kunde inte verifieras.'))
-            if exit_code:raise RuntimeError('Analysis process failed')
-            self.verify(report)
-            identity=self.register(report,path)
-            return dict(status='OK',analysis_id=identity,report=report)
-        def serialized():
-            with self.analysis_lock:return run()
-        return self.job(serialized)
+        request_file=self.output/f'request-{key}.json'
+        atomic_json(request_file,req);self.files[key]=request_file
+        return self.worker_task(key,None,path,'analyze')
 
     def detail(self,identity,index):
         report=self.reports[identity]
@@ -151,6 +158,16 @@ class Review:
 
     def nminus(self,identity):
         if identity not in self.reports:raise ValueError('Unknown analysis')
+        from datetime import datetime,timedelta
+        from zoneinfo import ZoneInfo
+        report=self.reports[identity];meta=report['metadata'];p=meta['parameters']
+        first=datetime.fromisoformat(meta['start_minutes'][0]).astimezone(ZoneInfo(p['feed_timezone']))
+        midnight=first.replace(hour=0,minute=0,second=0,microsecond=0)
+        has_transit=any(obs.get('rides') for obs in report['minute_observations'])
+        latest=report['minute_observations'][-1]['start_seconds']+p['max_time_seconds']+(HORIZON_SECONDS if has_transit else 0)
+        reference_offset=midnight.utcoffset() if has_transit else first.utcoffset()
+        if latest>=86400 or (midnight+timedelta(seconds=latest)).utcoffset()!=reference_offset:
+            return dict(status='UNSUPPORTED_WINDOW',message='N−1 stöder ännu inte trafikdygns- eller tidsomställningsövergång. Välj ett datum utan tidsomställning eller ett tidigare avreseintervall.')
         path=self.output/f'nminus-{identity}-{self.nminus_engine}.json'
         # Reuse CLI validation artifacts only when baseline identity AND current
         # N−1 code hashes match. Runtime/timing metadata is kept outside results.
@@ -159,17 +176,47 @@ class Review:
                 saved=ROOT/'outputs/nminus'/f'{case}_1.json'
                 if saved.exists():
                     value=json.loads(saved.read_text(encoding='utf-8'))
-                    if value.get('analysis_id')==identity and all(fingerprint(ROOT/'scripts'/name)==h for name,h in value.get('code_hashes',{}).items()) and value.get('code_hashes'):
+                    current=all(fingerprint(ROOT/'scripts'/name)==h for name,h in value.get('code_hashes',{}).items()) and bool(value.get('code_hashes'))
+                    archived=value.get('canonical_sha256')==self.legacy_nminus.get(case) and identity==self.legacy.get(case)
+                    if value.get('analysis_id')==identity and (current or archived):
                         validate_result(value,self.reports[identity])
+                        if 'combined' not in value:
+                            value['combined']=combined_nminus(value['minute_observations'],value['scenarios'])
+                            value['canonical_sha256']=digest({k:v for k,v in value.items() if k not in ('canonical_sha256','analysis_id','source')})
                         atomic_json(path,value);break
         return self.worker_task(identity,None,path,'nminus')
 
+    def deadline(self,data):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        identity=data['analysis_id'];report=self.reports[identity]
+        zone=ZoneInfo(report['metadata']['timezone'])
+        instant=datetime.fromisoformat(report['metadata']['date']+'T'+data['deadline']).replace(tzinfo=zone)
+        if instant.utcoffset()!=instant.replace(fold=1).utcoffset():raise ValueError('Ambiguous deadline')
+        pending=self.nminus(identity)
+        if pending.get('status')=='UNSUPPORTED_WINDOW':return pending
+        def work():
+            import time
+            while self.jobs[pending['job_id']]['status']=='LOADING':time.sleep(.1)
+            job=self.jobs[pending['job_id']]
+            if job['status']!='DONE' or job['result']['status']!='OK':raise ValueError('N−1 deadline calculation failed')
+            nminus=job['result'];combined=nminus.get('combined') or combined_nminus(report['minute_observations'],nminus['scenarios'])
+            return dict(status='OK',analysis_id=identity,**deadline_result(report['minute_observations'],combined,instant.isoformat()))
+        return self.job(work)
+
     def worker_task(self,identity,index,path,command):
+        def publish(result):
+            if command=='analyze' and result['status']=='OK':
+                self.verify(result)
+                actual=self.register(result,path)
+                return dict(status='OK',analysis_id=actual,report=result)
+            return result
         def run():
             with self.lock:
                 if path.exists():
                     result=json.loads(path.read_text(encoding='utf-8'))
                     if result['status']=='OK':
+                        if command=='analyze':return publish(result)
                         if result.get('analysis_id')!=identity:raise ValueError('Cache belongs to another analysis')
                         if command=='nminus':validate_result(result,self.reports[identity])
                         return dict(result,source='cache')
@@ -189,7 +236,7 @@ class Review:
                 self.process.stdin.write(json.dumps(dict(command=command,report=str(self.files[identity]),analysis_id=identity,index=index,output=str(path)))+'\n');self.process.stdin.flush()
                 try:
                     response=self.responses.get(timeout=600)
-                    if response=='REVIEW_RESULT '+str(path):return json.loads(path.read_text(encoding='utf-8'))
+                    if response=='REVIEW_RESULT '+str(path):return publish(json.loads(path.read_text(encoding='utf-8')))
                 except queue.Empty:self.process.kill()
                 self.process.wait();self.reap()
                 raise RuntimeError('Detail worker exited')
@@ -227,7 +274,11 @@ def handler(review):
         def do_GET(self):
             if not self.trusted():self.send(dict(message='Endast lokal åtkomst'),403);return
             path=urlparse(self.path).path
-            if path=='/api/presets':self.send(dict(presets=review.presets,parameters=PARAMETERS));return
+            if path=='/api/presets':
+                value=dict(presets=review.presets,parameters=PARAMETERS)
+                if hasattr(review,'coverage'):
+                    value.update(coverage=dict(first=review.coverage['first'],last=review.coverage['last']),area=review.area,max_window_minutes=120)
+                self.send(value);return
             if path.startswith('/api/jobs/'):
                 self.send(review.jobs.get(path.rsplit('/',1)[1],dict(status='ERROR',message='Okänd körning')));return
             if path.startswith('/api/results/'):
@@ -255,6 +306,7 @@ def handler(review):
                 if self.path=='/api/analyze':result=review.analyze(data)
                 elif self.path=='/api/detail':result=review.detail(data['analysis_id'],data['index'])
                 elif self.path=='/api/nminus':result=review.nminus(data['analysis_id'])
+                elif self.path=='/api/deadline':result=review.deadline(data)
                 else:self.send(dict(message='Hittades inte'),404);return
                 self.send(result)
             except (ValueError,KeyError,TypeError) as error:self.send(dict(status='INVALID_REQUEST',message='Kontrollera koordinater, datum, tidszon och heltalsminuter.'),400)

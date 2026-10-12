@@ -1,5 +1,12 @@
 # Lokal granskningsvy – Phase 2D
 
+# Uppdaterad lokal planerare
+
+Vyn stödjer nu egna kartpunkter/koordinater, 1–4 trafikben, samlat N−1 och
+”framme senast”. Aktuellt kontrakt, startkommandon, begränsningar och
+cache-/workerlivscykel finns i [PLANNER.md](PLANNER.md). Tidigare
+granskningsbeskrivning längre ned avser den bevarade Phase 2D-vyn.
+
 Aktuell vidareutveckling lägger till separat N−1-scenarioval och en
 Leaflet/OpenStreetMap-bakgrund. Kontrakt, villkor och aktuella verifieringar
 finns i [N_MINUS_ONE.md](N_MINUS_ONE.md) och

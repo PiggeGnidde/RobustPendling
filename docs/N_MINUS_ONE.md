@@ -1,5 +1,10 @@
 # Deterministisk N−1 enligt tidtabell
 
+**Utökning `nminus-1.1`:** [planerarkontraktet](PLANNER.md) generaliserar
+bensbudgeten till 1–4 och lägger till `combined` samt deadline. Beskrivningen
+nedan av två ben avser det bevarade ursprungliga regressionstestet/default.
+Nya anrop bevarar den budget som valts för hela genomförd + återstående resa.
+
 **Scenario enligt tidtabell – ingen sannolikhet för inställd tur uppskattas.**
 Detta är en separat konsekvensanalys. Basfallet behåller exakt Phase 2C:s
 60 startminuter, T50_schedule/T90_schedule/T99_schedule och gränsen 45 min.

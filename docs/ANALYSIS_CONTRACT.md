@@ -1,5 +1,13 @@
 # A–B-analyskontrakt, schema 2.0 (Phase 2B/2C)
 
+# Planerarutökning
+
+Den lokala A–B-planeraren accepterar nu `max_rides` 1–4, kontrollerar
+datumtäckning och erbjuder samlat N−1 samt ankomstdeadline enligt
+[PLANNER.md](PLANNER.md). Default/regressionsexemplen behåller två ben.
+Deadline prövas per startminut; schedule-kvantiler är variation över
+startminuter och anger inte verklig punktlighet för en vald avgång.
+
 CLI:n `scripts/analyze_t90.py` är anropsgränsen för ett framtida webbgränssnitt.
 Det separata N−1-kontraktet och resultaten finns i
 [N_MINUS_ONE.md](N_MINUS_ONE.md) och [N_MINUS_ONE_VALIDATION.md](N_MINUS_ONE_VALIDATION.md).

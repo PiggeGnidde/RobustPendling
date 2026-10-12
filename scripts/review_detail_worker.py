@@ -15,6 +15,8 @@ from schedule_sweep import load_trips
 
 def main():
     config=Path(sys.argv[1]); inputs=paths(config)
+    source_names=('analyze_t90.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','planner_core.py','nminus_core.py','nminus_engine.py','nminus_validation.py','t90_core.py','analysis_contract.py')
+    loaded_sources={name:fingerprint(ROOT/'scripts'/name) for name in source_names}
     hashes={k:fingerprint(inputs[k]) for k in ('osm','gtfs')}
     for key,value in {'JAVA_HOME':str(Path(sys.prefix)/'Library/lib/jvm'),
         'LOCALAPPDATA':str(ROOT/'cache/runtime'),'APPDATA':str(ROOT/'cache/config'),
@@ -40,6 +42,21 @@ def main():
         task=json.loads(line)
         if task.get('command')=='stop':break
         try:
+            if any(fingerprint(ROOT/'scripts'/name)!=value for name,value in loaded_sources.items()):
+                raise ValueError('Routing code changed; restart the review server')
+            if task.get('command')=='analyze':
+                from analyze_t90 import parser,worker
+                from analysis_contract import request_grid
+                data=json.loads(Path(task['report']).read_text(encoding='utf-8'))
+                arguments=['--config',str(config),'--output',task['output'],'--planner']
+                for key,value in data.items():arguments.extend(['--'+key.replace('_','-'),str(value)])
+                args=parser().parse_args(arguments)
+                if network is None:
+                    started=time.perf_counter();network=r5py.TransportNetwork(inputs['osm'],[derived])
+                    build_seconds=time.perf_counter()-started
+                worker(args,request_grid(args.date,args.start,args.window_minutes,args.timezone),reused_network=network)
+                print('REVIEW_RESULT '+task['output'],flush=True)
+                continue
             report=json.loads(Path(task['report']).read_text(encoding='utf-8'))
             actual_versions=dict(python=sys.version.split()[0],r5py=r5py.__version__,r5='7.5.1-r5py',
                 java=str(jpype.JClass('java.lang.System').getProperty('java.version')))
@@ -52,12 +69,12 @@ def main():
                 started=time.perf_counter()
                 network=r5py.TransportNetwork(inputs['osm'],[derived])
                 build_seconds=time.perf_counter()-started
-            if task.get('command')=='nminus':
+            if task.get('command') in ('nminus','regression'):
                 from nminus_engine import NMinusEngine
                 if nminus is None:nminus=NMinusEngine(network,derived,stops,expected)
-                result=nminus.analyze(report)
+                result=nminus.analyze(report,baseline_only=task['command']=='regression')
                 from nminus_validation import validate_result
-                validate_result(result,report)
+                if task['command']=='nminus':validate_result(result,report)
                 if any(fingerprint(inputs[k])!=hashes[k] for k in hashes):raise ValueError('Inputs changed during N−1 routing')
                 result.update(analysis_id=task['analysis_id'])
                 atomic_json(Path(task['output']),result)
@@ -69,7 +86,7 @@ def main():
             trips={t['id']:t for t in load_trips(derived,instant,ready,ready+2700)}
             params=report['metadata']['parameters']
             rep=dict(index=index,start=obs['start'],percentile_roles=[],audit_roles=[],status='REACHABLE')
-            item,features=collect(network,params['origin'],params['destination'],rep,obs,instant,trips,names,coordinates)
+            item,features=collect(network,params['origin'],params['destination'],rep,obs,instant,trips,names,coordinates,parameters=params)
             if not item['matches_sweep']:raise ValueError('Detail does not match verified minute sweep')
             if any(fingerprint(inputs[k])!=hashes[k] for k in hashes):raise ValueError('Inputs changed during routing')
             result=dict(status='OK',analysis_id=task['analysis_id'],index=index,itinerary=item,

@@ -3,11 +3,13 @@ from datetime import datetime
 import hashlib
 import json
 from analysis_contract import itinerary_timing,validate_geojson
-from nminus_core import HORIZON_SECONDS,summarize
+from nminus_core import HORIZON_SECONDS,summarize,remaining_resources
 from t90_core import PARAMETERS
+from planner_core import routing_parameters,combined_nminus
 
 
 def validate_result(result,base):
+    parameters=routing_parameters(base.get('metadata',{}).get('parameters',{}).get('max_rides',2))
     if 'canonical_sha256' in result:
         canonical={k:v for k,v in result.items() if k not in ('canonical_sha256','analysis_id','source')}
         checksum=hashlib.sha256(json.dumps(canonical,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
@@ -15,6 +17,8 @@ def validate_result(result,base):
     if result['status']!='OK' or result['base_metrics']!=base['metrics'] or result['minute_observations']!=base['minute_observations']:
         raise ValueError('Baseline differs')
     checked=0;unreachable=0;not_applicable=0
+    if result.get('schema_version')=='nminus-1.1' and set(result['scenarios'])!={str(n) for n in range(1,parameters['max_rides']+1)}:
+        raise ValueError('Missing configured leg scenario')
     for number,rows in result['scenarios'].items():
         if len(rows)!=len(base['minute_observations']):raise ValueError('Minute silently omitted')
         for index,(row,obs) in enumerate(zip(rows,base['minute_observations'])):
@@ -27,6 +31,9 @@ def validate_result(result,base):
                 not_applicable+=1;continue
             if not applicable:raise ValueError('Nonexistent failed leg')
             position=positions[int(number)-1]
+            if 'remaining_parameters' in row:
+                walked=sum(leg['walking_seconds'] for leg in baseline[:position])
+                if row['remaining_parameters']!=remaining_resources(walked,int(number)-1,parameters):raise ValueError('Remaining resources differ')
             if row['completed']['segments']!=baseline[:position]:raise ValueError('Completed route changed')
             if row['failed_leg']!=obs['rides'][int(number)-1]:raise ValueError('Wrong cancelled trip')
             notify=row['notification'];failed=row['failed_leg'];prefix=row['completed']['segments']
@@ -51,7 +58,7 @@ def validate_result(result,base):
                 rides=[s for s in segments if s['mode']!='WALK']
                 if any(s['trip_id']==failed['trip_id'] for s in rides):raise ValueError('Cancelled trip reused at another stop')
                 walk=sum(s['walking_seconds'] for s in prefix+segments)
-                if walk>PARAMETERS['max_walk_seconds'] or len(rides)+int(number)-1>PARAMETERS['max_rides']:raise ValueError('Resource budget reset')
+                if walk>parameters['max_walk_seconds'] or len(rides)+int(number)-1>parameters['max_rides']:raise ValueError('Resource budget reset')
                 if row['raw_r5_seconds']!=reserve['duration_seconds']:raise ValueError('R5/sweep mismatch')
                 checked+=1
             else:raise ValueError('Unknown status')
@@ -64,5 +71,6 @@ def validate_result(result,base):
             validate_geojson(row['geojson'])
             if row['geojson']['features']!=expected:raise ValueError('Map differs from itinerary')
         if result['summaries'][number]!=summarize(rows):raise ValueError('Wrong summary population/quantiles')
+    if 'combined' in result and result['combined']!=combined_nminus(base['minute_observations'],result['scenarios']):raise ValueError('Wrong combined N−1 envelope')
     return dict(reachable_checked=checked,unreachable_checked=unreachable,not_applicable_checked=not_applicable,
                 prefix_preserved=True,exact_failed_trip_absent=True,boarding_and_horizon_valid=True,geojson_matches_segments=True)

@@ -11,6 +11,8 @@ Projektet innehåller en validerad tidtabellsmotor och en lokal interaktiv
 Deterministisk N−1-analys av uteblivna turer beskrivs i
 [kontraktet](docs/N_MINUS_ONE.md) och [valideringsrapporten](docs/N_MINUS_ONE_VALIDATION.md).
 [Små JSON-exempel](examples/README.md) visar sparade resultat utan rådata eller cache.
+Vyn är också en [lokal A–B-planerare](docs/PLANNER.md) med kartval, 1–4
+trafikben, samlat N−1 och tidtabellsbaserad ankomstdeadline.
 
 ## Miljökontroll
 

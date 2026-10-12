@@ -87,6 +87,18 @@ window.ReviewMap=(()=>{
   function clear(){last=null;if(group)group.clearLayers();$('map-fallback').replaceChildren();}
   function transform(){if(svgView)svgView.group.setAttribute('transform',`translate(${svgView.x} ${svgView.y}) scale(${svgView.scale})`);}
   let drag=null;
+  let picker=null,pickMarkers=[];
+  let pickerPoints=[];
+  function setPickerPoints(points){
+    pickerPoints=points;
+    if(!picker)return;
+    for(const p of points){
+      if(pickMarkers[p.endpoint])picker.removeLayer(pickMarkers[p.endpoint]);
+      delete pickMarkers[p.endpoint];
+      if(!Number.isFinite(p.lat)||!Number.isFinite(p.lon)||p.lat< -90||p.lat>90||p.lon< -180||p.lon>180)continue;
+      pickMarkers[p.endpoint]=L.circleMarker([p.lat,p.lon],{radius:8,color:p.endpoint==='from'?colors.base:colors.reserve,weight:3,fillColor:'white',fillOpacity:1}).bindTooltip(tooltip(p.endpoint==='from'?'A':'B'),{permanent:true}).addTo(picker);
+    }
+  }
   document.addEventListener('DOMContentLoaded',()=>{
     const svg=$('map-fallback');
     svg.addEventListener('wheel',event=>{if(!svgView)return;event.preventDefault();svgView.scale=Math.max(.5,Math.min(6,svgView.scale*(event.deltaY<0?1.15:.87)));transform();},{passive:false});
@@ -95,5 +107,20 @@ window.ReviewMap=(()=>{
     svg.addEventListener('pointerup',()=>drag=null);
   });
   window.addEventListener('load',()=>{if(last)render(last);});
-  return {render,clear,reset(){if(map&&bounds)map.fitBounds(bounds,{padding:[28,28],maxZoom:16});if(svgView){svgView.x=svgView.y=0;svgView.scale=1;transform();}}};
+  return {render,clear,setPickerPoints,pick(callback){
+    if(!window.L){$('pick-status').textContent='Kartbiblioteket är otillgängligt. Ange koordinaterna i fälten.';return;}
+    $('pick-map').hidden=false;
+    if(!picker){
+      picker=L.map('pick-map').setView([55.69,13.13],11);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:0,updateWhenIdle:true,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).on('tileerror',()=>{$('pick-status').textContent='Bakgrundskartan kunde inte laddas. Kartklick och koordinater fungerar ändå.';}).addTo(picker);
+      L.rectangle([[55.60,12.95],[55.80,13.30]],{color:'#277e97',fill:false,weight:2}).addTo(picker);
+      picker.on('click',event=>{
+        const endpoint=$('pick-endpoint').value;
+        if(pickMarkers[endpoint])picker.removeLayer(pickMarkers[endpoint]);
+        pickMarkers[endpoint]=L.circleMarker(event.latlng,{radius:8,color:endpoint==='from'?colors.base:colors.reserve,weight:3,fillColor:'white',fillOpacity:1}).bindTooltip(tooltip(endpoint==='from'?'A':'B'),{permanent:true}).addTo(picker);
+        callback(endpoint,event.latlng.lat,event.latlng.lng);
+      });
+    }picker.invalidateSize();setPickerPoints(pickerPoints);
+    $('pick-status').textContent='Välj A eller B och klicka. Rektangeln visar tillgängligt OSM-område.';
+  },reset(){if(map&&bounds)map.fitBounds(bounds,{padding:[28,28],maxZoom:16});if(svgView){svgView.x=svgView.y=0;svgView.scale=1;transform();}}};
 })();

@@ -1,0 +1,13 @@
+{
+  "source_commit": "7b80071e7f9851bbc74e81131920f89157887097",
+  "analysis_identities": {
+    "lomma_lund": "08db44db6cc78798b6cac33c93a3cb0f148a505a2c9bcbf1dc537d0c62eb32a3",
+    "malmo_varnhem": "4667ce7d28ac78343628621fe896f6384652602538befede05208c6a540bd746",
+    "gunnesbo_ideon": "a4f10e1d82adbade290ac1baa6a52170eae2cc6571570b25e1e5d7526c0ec405"
+  },
+  "nminus_checksums": {
+    "lomma_lund": "42e849cdb58f746475c72ce65d09a95696cc3e81a10b17ecf02b13428cdf215b",
+    "malmo_varnhem": "3cbe7b727be92f07baedab5413ecdc084ce5bef53344ae1672082b03ffc98886",
+    "gunnesbo_ideon": "8ad6828a7a856976c1aab56e1dc7b25b83a6ed2b9fab17c32194bcfc6b35604f"
+  }
+}

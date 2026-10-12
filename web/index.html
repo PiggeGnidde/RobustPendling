@@ -16,12 +16,19 @@
   <label>Till latitud<input name="to_lat" type="number" step="any" required></label><label>Till longitud<input name="to_lon" type="number" step="any" required></label>
   <label>Startnamn<input name="from_name"></label><label>Målnamn<input name="to_name"></label>
   <label>Datum<input name="date" type="date" required></label><label>Starttid<input name="start" type="time" required></label>
-  <label>Fönster, minuter<input name="window_minutes" type="number" min="1" max="1440" required></label><label>Tidszon<input name="timezone" required></label>
+  <label>Avreseintervall, minuter<input name="window_minutes" type="number" min="1" max="120" value="5" required></label><label>Tidszon<input name="timezone" required></label>
+  <label>Högst trafikben<select name="max_rides"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+  <label>Analysläge<select name="analysis_mode"><option value="departure">Avreseintervall</option><option value="deadline">Framme senast</option></select></label>
+  <label id="deadline-label" hidden>Framme senast (vald tidszon)<input name="deadline" type="time" value="08:00"></label>
   <button type="submit" class="primary">Analysera</button>
-</form><p id="parameters" class="muted"></p><p id="status" role="status" aria-live="polite">Läser förval…</p></section>
+</form><p id="parameters" class="muted"></p><p id="coverage" class="muted"></p>
+<div class="row"><button id="open-picker">Välj punkter på karta</button><label>Kartklick sätter<select id="pick-endpoint"><option value="from">A / start</option><option value="to">B / mål</option></select></label></div>
+<div id="pick-map" hidden aria-label="Klicka för att välja start eller mål"></div><p id="pick-status" role="status"></p>
+<p id="status" role="status" aria-live="polite">Läser förval…</p></section>
 <section id="results" hidden>
   <div class="notice"><strong>Enligt tidtabell – förseningar ingår inte.</strong><span>Varje analyserad startminut har lika vikt i baskvantilerna. Variation över starttider är inte sannolikheten att komma fram i tid.</span></div>
   <h2 id="relation"></h2><div id="metrics" class="metrics"></div>
+  <section id="deadline-results" class="panel" hidden><h2>Framme senast – tidtabellsbaserade villkor</h2><p id="deadline-status" role="status"></p><div id="deadline-choices" class="row"></div><p>Varje startminut i det explicita avreseintervallet bedöms. Ingen monoton ankomsttid antas och ingen sannolikhet i verklig trafik uppskattas.</p></section>
   <section class="panel"><div class="row"><label>Scenario<select id="scenario"><option value="base">Basfall</option><option value="1">Ben 1 uteblir</option><option value="2">Ben 2 uteblir</option></select></label><span id="nminus-status" role="status" aria-live="polite"></span></div>
     <div id="nminus-notice" class="notice scenario-notice" hidden><strong>Scenario enligt tidtabell – ingen sannolikhet för inställd tur uppskattas.</strong><span>Besked vid det felande benets planerade avgångstid, på dess påstigningshållplats. Genomförd resa och tid bevaras. Separata scenarier: exakt en tur uteblir åt gången. Sökhorisont: 120 minuter efter besked.</span></div>
     <div id="nminus-summary" hidden><h2 id="nminus-heading"></h2><div id="nminus-metrics" class="metrics"></div><p id="nminus-population"></p></div>
@@ -38,5 +45,5 @@
   </div>
   <section class="panel"><h2>Valda linjekombinationer i basfallet</h2><p>Andelar bland startminuternas valda optimala resor. Detta är inte en fullständig inventering av reservvägar.</p><div id="combinations"></div></section>
 </section>
-<footer>Nästa analysläge: ”framme senast kl. …”. Ingen sådan beräkning ingår i denna vy.</footer>
+<footer>Lokal tidtabellsplanerare · basresa högst 45 min · gång högst 15 min totalt · reserver högst 120 min efter besked · högst 1–4 trafikben.</footer>
 </main></body></html>
