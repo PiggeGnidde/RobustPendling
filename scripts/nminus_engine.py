@@ -166,7 +166,7 @@ class NMinusEngine:
         from r5py.r5.regional_task import RegionalTask
         from r5py.r5.trip_planner import TripPlanner
         self.calendar_check()
-        meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides']);origin=params['origin'];destination=params['destination']
+        meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides'],params['max_time_seconds']);origin=params['origin'];destination=params['destination']
         first=datetime.fromisoformat(meta['start_minutes'][0]);self.display_zone=first.tzinfo
         feed_first=first.astimezone(ZoneInfo(params['feed_timezone']));self.midnight=feed_first.replace(hour=0,minute=0,second=0,microsecond=0)
         observations=report['minute_observations'];earliest=observations[0]['start_seconds']

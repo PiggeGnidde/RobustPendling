@@ -16,6 +16,18 @@ from test_t90 import trip
 
 
 class PlannerTests(unittest.TestCase):
+    def test_two_hour_horizon_includes_long_journeys_with_original_walk_budget(self):
+        trips=[trip('long', [('a',120),('b',3000)])]
+        for rides in (1,2,3,4):
+            old=ScheduleSweep(trips,{'a':10},{'b':20},lambda s:{s:0},routing_parameters(rides,2700))
+            new=ScheduleSweep(trips,{'a':10},{'b':20},lambda s:{s:0},routing_parameters(rides,7200))
+            self.assertIsNone(old.at(0)['duration_seconds'])
+            self.assertEqual(new.at(0)['duration_seconds'],3080)
+            self.assertEqual(new.at(0)['walking_seconds'],30)
+            self.assertEqual(new.p['max_walk_seconds'],900)
+        for horizon in (0,7201,7260,True,7200.0):
+            with self.assertRaises(ValueError):routing_parameters(4,horizon)
+
     def chain(self,count):
         return [trip(str(n),[(str(n),100+n*300),(str(n+1),200+n*300)]) for n in range(count)]
 

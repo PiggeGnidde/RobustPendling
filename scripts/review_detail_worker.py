@@ -83,8 +83,8 @@ def main():
             index=task['index']; obs=report['minute_observations'][index]
             instant=datetime.fromisoformat(obs['start']).astimezone(ZoneInfo('Europe/Stockholm'))
             ready=instant.hour*3600+instant.minute*60
-            trips={t['id']:t for t in load_trips(derived,instant,ready,ready+2700)}
             params=report['metadata']['parameters']
+            trips={t['id']:t for t in load_trips(derived,instant,ready,ready+params['max_time_seconds'])}
             rep=dict(index=index,start=obs['start'],percentile_roles=[],audit_roles=[],status='REACHABLE')
             item,features=collect(network,params['origin'],params['destination'],rep,obs,instant,trips,names,coordinates,parameters=params)
             if not item['matches_sweep']:raise ValueError('Detail does not match verified minute sweep')

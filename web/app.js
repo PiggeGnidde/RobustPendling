@@ -25,15 +25,16 @@ function invalidate(){
   generation++;clearTrip();analysis=null;analysisId=null;nminus=null;nminusPending=null;
   $('scenario').value='base';$('results').hidden=true;
   $('deadline-results').hidden=true;$('deadline-choices').replaceChildren();
+  $('parameters').textContent=`Gång 3.6 km/h · högst 15 min gång totalt · ny basanalys högst 120 min · högst ${form.elements.max_rides.value} trafikben · boarding >60 s · reservhorisont 120 min efter besked`;
   syncPicker();
   status('Indata ändrade – kör analysen för att granska den nya resan.');
 }
 form.addEventListener('input',invalidate);
-function fill(request){for(const[key,value]of Object.entries(request))form.elements.namedItem(key).value=value;syncPicker();}
+function fill(request){for(const[key,value]of Object.entries(request)){const input=form.elements.namedItem(key);if(input)input.value=value;}syncPicker();}
 function syncPicker(){
   window.ReviewMap.setPickerPoints(['from','to'].map(endpoint=>({endpoint,lat:parseFloat(form.elements.namedItem(endpoint+'_lat').value),lon:parseFloat(form.elements.namedItem(endpoint+'_lon').value)})));
 }
-function read(){const request=Object.fromEntries(new FormData(form));delete request.analysis_mode;delete request.deadline;for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes','max_rides'])request[key]=Number(request[key]);return request;}
+function read(){const request=Object.fromEntries(new FormData(form));delete request.analysis_mode;delete request.deadline;for(const key of ['from_lat','from_lon','to_lat','to_lon','window_minutes','max_rides'])request[key]=Number(request[key]);request.max_time_minutes=120;return request;}
 form.elements.analysis_mode.addEventListener('change',()=>{$('deadline-label').hidden=form.elements.analysis_mode.value!=='deadline';});
 $('open-picker').addEventListener('click',()=>window.ReviewMap.pick((endpoint,lat,lon)=>{
   form.elements.namedItem(endpoint+'_lat').value=lat.toFixed(6);form.elements.namedItem(endpoint+'_lon').value=lon.toFixed(6);
@@ -47,7 +48,7 @@ async function run(request,presetId){
     value=await resolveJob(value,()=>token===generation);if(token!==generation||!value)return;
     if(value.status!=='OK')throw new Error(value.status+': '+(value.message||'Analysen kunde inte verifieras. Se den lokala körloggen.'));
     analysis=value.report;analysisId=value.analysis_id;render();
-    status('Verifierad basanalys · '+analysis.minute_observations.length+' startminuter');
+    status('Verifierad basanalys · '+analysis.minute_observations.length+' startminuter'+(analysis.metrics.route_coverage===0?' · Ingen resa inom analysens gränser för restid, gång och trafikben.':''));
     selectMinute(analysis.departure_jumps[0]?.before_index??0);
     if(form.elements.analysis_mode.value==='deadline')runDeadline(token);
   }catch(error){if(token===generation)status(error.message,true);}

@@ -1,5 +1,25 @@
 # Verifiering av lokal planerare, 2026-10-12
 
+## Korrigering av basresans sökhorisont
+
+Nya vyanalyser använder 120 minuter i stället för 45. Parametern följer
+med genom worker/supervisor, rå R5, oberoende sweep, detaljer, N−1-validering,
+metadata, cacheidentitet och dygnsgränskontroll. Gånggränsen är fortsatt
+15 minuter totalt. Originalförval och deras frysta 45-minutersresultat
+bevaras och skiljs från nya analyser.
+
+Ett exakt minutprov Bjärred → Lund, 2026-10-14 06:54, gav 54:06 och ankomst
+07:48:06 med buss 137 → 6 → 171, gång 11:27 och väntan 14:44, samt 60 s
+slutmarginal. Oberoende sökning och rå R5 överensstämmer. Den gamla gränsen
+gav inget resultat eftersom resan tog mer än 45 minuter. Detaljresan och
+kartan kontrollerades i vyn. Ett enda prov innebär inga slutsatser om
+variation över ett större avreseintervall. Lokala koordinater/resultat
+för detta användarprov publiceras inte.
+
+79 tester passerar, inklusive en resa över 45 minuter för alla bensgränser
+1–4, validering av horisonten, skilda cacheidentiteter och bibehållen
+45-minutersidentitet för originalförvalen. Inga nya fullständiga sweeps.
+
 ## Regression och testsvit
 
 77 tester passerade, inklusive 3-/4-benskedjor, strikta byten,

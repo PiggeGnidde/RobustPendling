@@ -13,7 +13,14 @@ lon 12.95–13.30, lat 55.60–55.80. Datatäckning garanterar inte en nåbar re
 
 ## Parametrar och flerbensrouting
 
-Gång 3,6 km/h, högst 900 s sammanlagd gång, basresa högst 2700 s.
+Gång 3,6 km/h, högst 900 s sammanlagd gång. Nya analyser från vyn söker
+basresor upp till 7200 s (120 minuter). Den tidigare 45-minutersgränsen
+kunde utesluta realistiska pendlingsresor. ”Ej nåbar” avser alltid analysens
+gränser, inte att det saknas en resa med längre gång eller restid.
+De sparade Phase 2C-förvalen behåller sina ursprungliga 2700 s och resultat.
+CLI använder fortfarande 45 minuter som historiskt default; ange
+`--max-time-minutes 120 --planner` för samma horisont som nya vyanalyser.
+API-fältet `max_time_minutes` ingår i cacheidentiteten och metadata.
 `max_rides` är ett heltal 1–4 (default 2). Boarding kräver strikt avgång
 efter aktuell ankomst + gång + 60 s; slutmarginal efter trafik är 60 s.
 Pickup/dropoff 0 och 3 tillåts; 1 och 2 avvisas före R5-dominanspruning.

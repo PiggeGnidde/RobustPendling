@@ -13,11 +13,23 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-from review_server import normalize,digest,cached_detail,handler,Review,run_analysis
+from review_server import normalize,digest,cached_detail,handler,Review,run_analysis,request_from_report
 from transit_inputs import atomic_json
 
 
 class ReviewTests(unittest.TestCase):
+    def test_two_hour_default_and_historical_cache_are_distinct(self):
+        req=normalize(self.request())
+        self.assertEqual(req['max_time_minutes'],120)
+        historic=normalize(dict(self.request(),max_time_minutes=45))
+        self.assertNotEqual(digest(req),digest(historic))
+        report=dict(metadata=dict(date=req['date'],timezone=req['timezone'],start_minutes=['2026-10-12T07:00:00+02:00']*60,
+                    parameters=dict(max_time_seconds=2700,max_rides=2,
+                    origin=dict(lat=req['from_lat'],lon=req['from_lon'],name=''),destination=dict(lat=req['to_lat'],lon=req['to_lon'],name=''))))
+        self.assertEqual(request_from_report(report),historic)
+        for horizon in (0,121,True,120.0):
+            with self.assertRaises(ValueError):normalize(dict(self.request(),max_time_minutes=horizon))
+
     def request(self):
         return dict(from_lat=55.67,from_lon=13.07,to_lat=55.70,to_lon=13.18,
                     date='2026-10-12',start='07:00',window_minutes=60,timezone='Europe/Stockholm')
@@ -54,7 +66,7 @@ class ReviewTests(unittest.TestCase):
         review=Review.__new__(Review)
         review.hashes={'osm':{'sha256':'47942e06ea6c96c8893933f71f448f7e1deac9d906c216a16c60a414db521b9d'}}
         review.area=None;review.coverage={'feed_timezone':'Europe/Stockholm'}
-        request=dict(self.request(),start='23:40',window_minutes=1)
+        request=dict(self.request(),start='22:01',window_minutes=1)
         self.assertEqual(review.analyze(request)['status'],'UNSUPPORTED_WINDOW')
 
     def test_pure_walk_does_not_require_two_hour_transit_horizon(self):

@@ -119,7 +119,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
     result=ExactDetailed(network,frame(origin),frame(destination),departure=feed_instant,
            departure_time_window=timedelta(minutes=5),speed_walking=3.6,
            transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-           max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),max_public_transport_rides=parameters['max_rides'])
+           max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),max_public_transport_rides=parameters['max_rides'])
     result=result.to_crs('EPSG:4326')
     families={};invalid=0
     for _,group in result.groupby('option'):
@@ -151,7 +151,7 @@ def collect(network,origin,destination,representative,observation,feed_instant,t
                 geometry_connectors_m=connectors))
         total=(datetime.fromisoformat(legs[-1]['arrival'])-datetime.fromisoformat(observation['start'])).total_seconds()
         walking=sum(l['walking_seconds'] for l in legs)
-        if not 0<=total<=2700 or walking>900 or any(l['wait_seconds']<0 for l in legs):invalid+=1;continue
+        if not 0<=total<=parameters['max_time_seconds'] or walking>900 or any(l['wait_seconds']<0 for l in legs):invalid+=1;continue
         rides=[dict(mode=l['mode'],route_id=l['route_id'],line=l['line'],start_stop=l['start_stop'],end_stop=l['end_stop']) for l in legs if l['mode']!='WALK']
         f=family(rides)
         item=dict(route_family=f, duration_seconds=total,walking_seconds=walking,

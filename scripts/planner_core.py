@@ -6,10 +6,12 @@ import zipfile
 from t90_core import PARAMETERS,statistics
 
 
-def routing_parameters(max_rides=2):
+def routing_parameters(max_rides=2, max_time_seconds=2700):
     if isinstance(max_rides,bool) or not isinstance(max_rides,int) or not 1<=max_rides<=4:
         raise ValueError('Choose 1 to 4 transit legs')
-    return dict(PARAMETERS,max_rides=max_rides)
+    if isinstance(max_time_seconds,bool) or not isinstance(max_time_seconds,int) or not 60<=max_time_seconds<=7200 or max_time_seconds%60:
+        raise ValueError('Choose a whole-minute journey horizon from 1 to 120 minutes')
+    return dict(PARAMETERS,max_rides=max_rides,max_time_seconds=max_time_seconds)
 
 
 def service_coverage(feed):

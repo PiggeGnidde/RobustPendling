@@ -48,14 +48,17 @@ def normalize(data):
         result.update({prefix+'_'+k:p[k] for k in ('lat','lon','name')})
     grid=request_grid(data['date'],data['start'],data['window_minutes'],data['timezone'])
     result.update(date=data['date'],start=grid[0].time().isoformat(),window_minutes=len(grid),timezone=data['timezone'])
-    result['max_rides']=routing_parameters(data.get('max_rides',2))['max_rides']
+    horizon=data.get('max_time_minutes',120)
+    if isinstance(horizon,bool) or not isinstance(horizon,int):raise ValueError('Journey horizon must be integer minutes')
+    params=routing_parameters(data.get('max_rides',2),horizon*60)
+    result.update(max_rides=params['max_rides'],max_time_minutes=horizon)
     if len(grid)>120:raise ValueError('Local planner allows at most 120 start minutes per request')
     return result
 
 
 def request_from_report(report):
     meta=report['metadata']; p=meta['parameters']; first=meta['start_minutes'][0]
-    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'],max_rides=p['max_rides'])
+    result=dict(date=meta['date'],start=first[11:19],window_minutes=len(meta['start_minutes']),timezone=meta['timezone'],max_rides=p['max_rides'],max_time_minutes=p['max_time_seconds']//60)
     for prefix,key in [('from','origin'),('to','destination')]:
         result.update({prefix+'_'+k:p[key][k] for k in ('lat','lon','name')})
     return normalize(result)
@@ -64,7 +67,7 @@ def request_from_report(report):
 def cached_detail(report,analysis_id,index):
     if isinstance(index,bool) or not isinstance(index,int) or not 0<=index<len(report['minute_observations']):raise ValueError('Ogiltig startminut')
     obs=report['minute_observations'][index]
-    if obs['duration_seconds'] is None:return dict(status='UNREACHABLE',analysis_id=analysis_id,index=index,message='Ingen användbar resa för denna startminut.')
+    if obs['duration_seconds'] is None:return dict(status='UNREACHABLE',analysis_id=analysis_id,index=index,message='Ingen resa hittades inom analysens gränser för restid, gång och trafikben. Det betyder inte att platsen saknar kollektivtrafik.')
     for item in report['representative_itineraries']:
         if item['index']==index and item['matches_sweep']:
             return dict(status='OK',analysis_id=analysis_id,index=index,itinerary=item,source='saved')
@@ -104,7 +107,7 @@ class Review:
     def verify(self,report):
         meta=report['metadata'];h=meta['input_hashes']
         if report['status']!='OK' or h['osm']!=self.hashes['osm'] or h['gtfs_original']!=self.hashes['gtfs']:raise ValueError('Analysis or inputs not verified')
-        if any(meta['parameters'].get(k)!=v for k,v in routing_parameters(meta['parameters']['max_rides']).items()):raise ValueError('Routing parameters differ')
+        if any(meta['parameters'].get(k)!=v for k,v in routing_parameters(meta['parameters']['max_rides'],meta['parameters']['max_time_seconds']).items()):raise ValueError('Routing parameters differ')
         if meta['versions']['r5py']!='1.1.7':raise ValueError('Unverified engine version')
         identity=digest(dict(metadata=meta,metrics=report['metrics'],minutes=report['minute_observations']))
         if identity in self.legacy.values():return
@@ -135,7 +138,7 @@ class Review:
         from zoneinfo import ZoneInfo
         if not self.coverage['feed_timezone']:return dict(status='UNSUPPORTED_FEED',message='Feeden behöver en entydig trafik-tidszon.')
         grid=[t.astimezone(ZoneInfo(self.coverage['feed_timezone'])) for t in request_grid(req['date'],req['start'],req['window_minutes'],req['timezone'])]
-        last=grid[-1]+timedelta(seconds=PARAMETERS['max_time_seconds'])
+        last=grid[-1]+timedelta(minutes=req['max_time_minutes'])
         if last.date()!=grid[0].date() or grid[-1].date()!=grid[0].date() or last.utcoffset()!=grid[0].utcoffset():
             return dict(status='UNSUPPORTED_WINDOW',message='Basresans sökhorisont passerar trafikdygn eller tidsomställning. Välj ett tidigare avreseintervall.')
         supported=date_check(self.coverage,grid[0].date().isoformat())
@@ -143,7 +146,7 @@ class Review:
         for identity,report in list(self.reports.items()):
             if request_from_report(report)==req:return dict(status='OK',analysis_id=identity,report=report)
         engine={name:fingerprint(ROOT/'scripts'/name) for name in ('analyze_t90.py','planner_core.py','schedule_sweep.py','detailed_routes.py','r5_adapter.py','t90_core.py','analysis_contract.py','review_detail_worker.py','nminus_core.py','nminus_engine.py')}
-        key=digest(dict(request=req,hashes=self.hashes,parameters=PARAMETERS,engine=engine))
+        key=digest(dict(request=req,hashes=self.hashes,parameters=routing_parameters(req['max_rides'],req['max_time_minutes']*60),engine=engine))
         path=self.output/f'analysis-{key}.json'
         request_file=self.output/f'request-{key}.json'
         atomic_json(request_file,req);self.files[key]=request_file
@@ -275,7 +278,7 @@ def handler(review):
             if not self.trusted():self.send(dict(message='Endast lokal åtkomst'),403);return
             path=urlparse(self.path).path
             if path=='/api/presets':
-                value=dict(presets=review.presets,parameters=PARAMETERS)
+                value=dict(presets=review.presets,parameters=routing_parameters(2,7200))
                 if hasattr(review,'coverage'):
                     value.update(coverage=dict(first=review.coverage['first'],last=review.coverage['last']),area=review.area,max_window_minutes=120)
                 self.send(value);return

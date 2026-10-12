@@ -42,6 +42,7 @@ def parser():
                    help='Detail both sides of the largest 0 to 3 adjacent increases')
     p.add_argument('--output', type=Path, default=ROOT/'outputs/t90_schedule_lomma_lund.json')
     p.add_argument('--max-rides',type=int,choices=range(1,5),default=2)
+    p.add_argument('--max-time-minutes',type=int,default=45,help='Journey horizon; local planner uses 120, historical CLI regression uses 45')
     p.add_argument('--planner',action='store_true',help='Skip redundant native/matrix diagnostics; exact R5 comparison remains')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--artifact-prefix',help=argparse.SUPPRESS)
@@ -55,7 +56,7 @@ def empty_response(status,message,meta=None,area=None):
 
 
 def worker(args, grid, reused_network=None):
-    parameters=routing_parameters(args.max_rides)
+    parameters=routing_parameters(args.max_rides,args.max_time_minutes*60)
     source_names=('analyze_t90.py','t90_core.py','schedule_sweep.py','smoke_helpers.py','analysis_contract.py','detailed_routes.py','r5_adapter.py','jvm_diagnostics.py','planner_core.py','nminus_core.py','nminus_engine.py')
     initial_code={name:fingerprint(ROOT/'scripts'/name) for name in source_names}
     inputs = paths(args.config)
@@ -88,7 +89,8 @@ def worker(args, grid, reused_network=None):
         atomic_json(args.output,empty_response('UNSUPPORTED_FEED','A single agency timezone is required',early_meta,area));return
     feed_timezone=agency_zones.pop()
     grid=[t.astimezone(ZoneInfo(feed_timezone)) for t in grid]
-    if any(t.date()!=grid[0].date() or t.utcoffset()!=t.replace(fold=1).utcoffset() for t in grid) or (grid[-1]+timedelta(minutes=45)).date()!=grid[0].date() or (grid[-1]+timedelta(minutes=45)).utcoffset()!=grid[0].utcoffset():
+    horizon_end=grid[-1]+timedelta(seconds=parameters['max_time_seconds'])
+    if any(t.date()!=grid[0].date() or t.utcoffset()!=t.replace(fold=1).utcoffset() for t in grid) or horizon_end.date()!=grid[0].date() or horizon_end.utcoffset()!=grid[0].utcoffset():
         atomic_json(args.output,empty_response('UNSUPPORTED_WINDOW','Feed-day crossing or DST transition is not yet supported',early_meta,area));return
     supported=date_check(service_coverage(inputs['gtfs']),grid[0].date().isoformat())
     if supported['status']!='OK':
@@ -120,7 +122,7 @@ def worker(args, grid, reused_network=None):
     build_seconds = time.perf_counter()-started
     request = RegionalTask(network, departure=grid[0], departure_time_window=timedelta(hours=1),
                           transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                          speed_walking=3.6, max_time=timedelta(seconds=2700),
+                          speed_walking=3.6, max_time=timedelta(seconds=parameters['max_time_seconds']),
                           max_time_walking=timedelta(seconds=900), max_public_transport_rides=parameters['max_rides'])
     task = request._regional_task
     task.fromLat,task.fromLon = origin['lat'],origin['lon']
@@ -149,7 +151,7 @@ def worker(args, grid, reused_network=None):
         return transfer_cache[stop]
     midnight = grid[0].replace(hour=0,minute=0,second=0,microsecond=0)
     start_seconds = [t.hour*3600+t.minute*60 for t in grid]
-    trips = load_trips(derived,grid[0],start_seconds[0],start_seconds[-1]+2700)
+    trips = load_trips(derived,grid[0],start_seconds[0],start_seconds[-1]+parameters['max_time_seconds'])
     direct_walk=min((round(t.travel_time.total_seconds()) for t in planner.direct_paths),default=None)
     sweep = ScheduleSweep(trips,access,egress,transfers,parameters,direct_walk_seconds=direct_walk)
     started = time.perf_counter()
@@ -204,7 +206,7 @@ def worker(args, grid, reused_network=None):
                     mode=str(info.route_type),start_stop=ids[int(previous.stop)],end_stop=ids[int(current.stop)],
                     departure_seconds=int(current.boardTime),arrival_seconds=int(current.time)))
         duration = int(state.time)-ready+parameters['egress_slack_seconds']
-        if not rides or walking_seconds>900 or duration>2700: return None
+        if not rides or walking_seconds>900 or duration>parameters['max_time_seconds']: return None
         return dict(duration_seconds=duration,walking_seconds=walking_seconds,rides=rides)
     comparisons = []
     for row,seconds in zip(observations,start_seconds):
@@ -248,7 +250,7 @@ def worker(args, grid, reused_network=None):
         matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=grid[0],
                      departure_time_window=timedelta(minutes=len(grid)),percentiles=[50,90,99],
                      transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                     speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
+                     speed_walking=3.6,max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),
                      max_public_transport_rides=parameters['max_rides'])
         import pandas as pd
         matrix_comparison = json.loads(pd.DataFrame(matrix).to_json(orient='records'))
@@ -260,7 +262,7 @@ def worker(args, grid, reused_network=None):
                 minute_matrix = r5py.TravelTimeMatrix(network,frame(origin),frame(destination),departure=instant,
                      departure_time_window=timedelta(minutes=1),percentiles=[50],
                      transport_modes=[r5py.TransportMode.WALK,r5py.TransportMode.TRANSIT],
-                     speed_walking=3.6,max_time=timedelta(minutes=45),max_time_walking=timedelta(minutes=15),
+                     speed_walking=3.6,max_time=timedelta(seconds=parameters['max_time_seconds']),max_time_walking=timedelta(minutes=15),
                      max_public_transport_rides=parameters['max_rides'])
                 matrix_warnings.update(str(w.message) for w in captured)
             result_minutes = json.loads(pd.DataFrame(minute_matrix).to_json(orient='records'))[0]['travel_time']
@@ -377,7 +379,8 @@ def main():
         command = [sys.executable,'-B',str(Path(__file__).resolve()),'--worker','--config',str(args.config.resolve()),
                    '--date',args.date,'--start',args.start,'--window-minutes',str(len(grid)),'--timezone',args.timezone,
                    '--output',str(work_result),'--artifact-prefix',args.output.stem]
-        command.extend(['--audit-jumps',str(args.audit_jumps),'--max-rides',str(args.max_rides)])
+        command.extend(['--audit-jumps',str(args.audit_jumps),'--max-rides',str(args.max_rides),
+                        '--max-time-minutes',str(args.max_time_minutes)])
         if args.planner:command.append('--planner')
         for endpoint in ('from','to'):
             for field in ('lat','lon','name'):

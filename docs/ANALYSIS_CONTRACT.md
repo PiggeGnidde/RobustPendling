@@ -71,6 +71,13 @@ med noll byten och utan kollektivtrafikens slack. Detta påverkar inte
 Lomma–Lund eftersom direkt gång överskrider budgeten. Ingen stokastik
 eller nya percentilregler har lagts till.
 
+Ovanstående 2700 s och två ben avser de historiska Phase 2B/2C-förvalen.
+Den lokala planeraren använder nu **7200 s (120 minuter)** för nya
+basanalyser och 1–4 valda trafikben. API-parametern `max_time_minutes`
+och resultatets `metadata.parameters.max_time_seconds` anger horisonten;
+den följer med genom routing, detaljresor, validering och cacheidentitet.
+Ett resultat `UNREACHABLE` avser bara dessa dokumenterade analysgränser.
+
 ## JSON och strukturella mått
 
 Alla tidsmått är **sekunder**; andelar är **0…1**. Tider är ISO 8601 med
