@@ -5,6 +5,15 @@ window.ReviewMap=(()=>{
   let map=null,group=null,tiles=null,bounds=null,last=null,svgView=null,tileAdded=false,tileFailed=false;
   const $=id=>document.getElementById(id);
   const lines=leg=>leg.geometry.type==='LineString'?[leg.geometry.coordinates]:leg.geometry.coordinates;
+  function connections(leg){
+    const ls=lines(leg),lengths=leg.geometry_connectors_m||{},result=[];
+    if(lengths.start>1)result.push({coordinates:ls[0].slice(0,2),label:'start',meters:lengths.start});
+    if(lengths.end>1)result.push({coordinates:ls.at(-1).slice(-2),label:'mål',meters:lengths.end});
+    for(const coordinates of leg.geometry.approximate_connections||[]){
+      const [a,b]=coordinates,meters=Math.hypot((a[0]-b[0])*111320*Math.cos((a[1]+b[1])*Math.PI/360),(a[1]-b[1])*111320);
+      if(meters>1)result.push({coordinates,label:'intern',meters});
+    }return result;
+  }
   function tooltip(value){const node=document.createElement('span');node.textContent=value;return node;}
   function marker(point,label,color,radius=5){
     return L.circleMarker([point[1],point[0]],{radius,color,weight:2,fillColor:'white',fillOpacity:1}).bindTooltip(tooltip(label)).addTo(group);
@@ -22,12 +31,14 @@ window.ReviewMap=(()=>{
       // No prefetch/offline scraping: add tile layer only when map is in view.
       const observer=new IntersectionObserver(entries=>{
         if(entries.some(e=>e.isIntersecting)){
-          map.invalidateSize();if(bounds)map.fitBounds(bounds,{padding:[28,28],maxZoom:16});
+          // Preserve user zoom and connection focus when scrolling back here.
+          map.invalidateSize();
           if(!tileAdded){tiles.addTo(map);tileAdded=true;}
         }
       });observer.observe($('map'));
     }
     group.clearLayers();$('map-status').textContent=tileFailed?'Bakgrundskartan kunde inte laddas helt. Rutter och markörer fungerar ändå.':tileAdded?'OpenStreetMap · lokala rutter och markörer':'Bakgrundskartan laddas när kartan visas.';
+    const overlays=[];
     for(const phase of ['base','completed','reserve']){
       let rides=0;
       for(const leg of data[phase]||[]){
@@ -37,11 +48,8 @@ window.ReviewMap=(()=>{
           const path=L.polyline(coords.map(p=>[p[1],p[0]]),{color,weight:phase==='base'&&data.notification?width+4:width,dashArray:walking?'6 5':null,opacity:phase==='base'&&data.notification?0.5:0.9});
           path.bindTooltip(tooltip(`${phase} · ${leg.mode} ${leg.line||''} · ${leg.start_stop_name} → ${leg.end_stop_name}`)).addTo(group);
         }
-        const ls=lines(leg),connectors=leg.geometry_connectors_m;
-        if(connectors)for(const[key,coords]of [['start',ls[0].slice(0,2)],['end',ls.at(-1).slice(-2)]])if(connectors[key]>1){
-          L.polyline(coords.map(p=>[p[1],p[0]]),{color:'#e18118',weight:5,dashArray:'5 4'}).bindTooltip(tooltip('Approximativ anslutning · '+phase)).addTo(group);
-        }
-        for(const coords of leg.geometry.approximate_connections||[])L.polyline(coords.map(p=>[p[1],p[0]]),{color:'#e18118',weight:5,dashArray:'5 4'}).bindTooltip(tooltip('Approximativ intern anslutning')).addTo(group);
+        const ls=lines(leg);
+        for(const connection of connections(leg))overlays.push({...connection,phase});
         marker(ls[0][0],leg.start_stop_name||'Start',color);marker(ls.at(-1).at(-1),leg.end_stop_name||'Mål',color);
         if(!walking&&++rides>1)marker(ls[0][0],'Byte: '+leg.start_stop_name,color,8);
       }
@@ -54,15 +62,23 @@ window.ReviewMap=(()=>{
       stop.setStyle({weight:4,fillColor:'#fff0eb'});
       stop.bindTooltip(tooltip('BESKED: '+notification.stop_name),{permanent:true,direction:'top'});
     }
+    // Draw after all routes/markers so short connections are not overpainted.
+    for(const connection of overlays){
+      const coords=connection.coordinates;
+      const label=`Approximativ anslutning · ${connection.label} · ${Math.round(connection.meters)} m`;
+      L.polyline(coords.map(p=>[p[1],p[0]]),{color:'#e18118',weight:5,dashArray:'5 4'}).bindTooltip(tooltip(label)).addTo(group).bringToFront();
+      const a=coords[0],b=coords.at(-1);
+      marker([(a[0]+b[0])/2,(a[1]+b[1])/2],label,'#e18118',4).bringToFront();
+    }
     bounds=group.getBounds();map.invalidateSize();map.fitBounds(bounds,{padding:[28,28],maxZoom:16});
   }
   function node(tag,attrs,parent){const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);parent.append(n);return n;}
-  function drawFallback(data){
+  function drawFallback(data,focusPoints=null){
     $('map').hidden=true;$('map-fallback').hidden=false;
     $('map-status').textContent='Kartbiblioteket kunde inte laddas. Lokal reservkarta visar rutter och markörer utan bakgrund.';
     const svg=$('map-fallback');svg.replaceChildren();
     const segments=['base','completed','reserve'].flatMap(phase=>(data[phase]||[]).map(leg=>({phase,leg})));
-    const points=segments.flatMap(({leg})=>lines(leg).flat()).concat([[data.origin.lon,data.origin.lat],[data.destination.lon,data.destination.lat]]);
+    const points=focusPoints||segments.flatMap(({leg})=>lines(leg).flat()).concat([[data.origin.lon,data.origin.lat],[data.destination.lon,data.destination.lat]]);
     const lat=points.reduce((a,p)=>a+p[1],0)/points.length,c=Math.cos(lat*Math.PI/180);
     const west=Math.min(...points.map(p=>p[0]*c)),east=Math.max(...points.map(p=>p[0]*c)),south=Math.min(...points.map(p=>p[1])),north=Math.max(...points.map(p=>p[1]));
     const scale=Math.min(570/Math.max(east-west,.001),350/Math.max(north-south,.001));
@@ -72,12 +88,15 @@ window.ReviewMap=(()=>{
     function mark(p,label,color,radius){const[x,y]=project(p);node('circle',{cx:x,cy:y,r:radius,fill:'white',stroke:color,'stroke-width':2},group);node('text',{x:x+8,y:y-8},group).textContent=label;}
     for(const{phase,leg}of segments){
       const ls=lines(leg);for(const coords of ls)path(coords,colors[phase],leg.mode==='WALK'?'6 5':'',leg.mode==='RAIL'?6:4);
-      if(leg.geometry_connectors_m)for(const[key,coords]of [['start',ls[0].slice(0,2)],['end',ls.at(-1).slice(-2)]])if(leg.geometry_connectors_m[key]>1)path(coords,'#e18118','5 4',5);
-      for(const coords of leg.geometry.approximate_connections||[])path(coords,'#e18118','5 4',5);
       mark(ls[0][0],leg.start_stop_name||'',colors[phase],4);mark(ls.at(-1).at(-1),leg.end_stop_name||'',colors[phase],4);
     }
     mark([data.origin.lon,data.origin.lat],'START','#17313e',8);mark([data.destination.lon,data.destination.lat],'MÅL','#17313e',8);
     if(data.notification)mark(data.notification.coordinates,'BESKED · '+data.notification.stop_name,'#bf2f24',12);
+    for(const{leg}of segments)for(const connection of connections(leg)){
+      path(connection.coordinates,'#e18118','5 4',5);
+      const a=connection.coordinates[0],b=connection.coordinates.at(-1);
+      mark([(a[0]+b[0])/2,(a[1]+b[1])/2],'','#e18118',4);
+    }
   }
   function render(data){
     last=data;
@@ -107,7 +126,14 @@ window.ReviewMap=(()=>{
     svg.addEventListener('pointerup',()=>drag=null);
   });
   window.addEventListener('load',()=>{if(last)render(last);});
-  return {render,clear,setPickerPoints,pick(callback){
+  return {render,clear,setPickerPoints,connections,focusConnections(leg){
+    const points=connections(leg).flatMap(c=>c.coordinates);
+    if(!points.length)return;
+    if(map&&!$('map').hidden){
+      map.fitBounds(L.latLngBounds(points.map(p=>[p[1],p[0]])),{padding:[55,55],maxZoom:19});
+      $('map').scrollIntoView({block:'center'});
+    }else if(svgView&&last){drawFallback(last,points);$('map-fallback').scrollIntoView({block:'center'});}
+  },pick(callback){
     if(!window.L){$('pick-status').textContent='Kartbiblioteket är otillgängligt. Ange koordinaterna i fälten.';return;}
     $('pick-map').hidden=false;
     if(!picker){
@@ -122,5 +148,5 @@ window.ReviewMap=(()=>{
       });
     }picker.invalidateSize();setPickerPoints(pickerPoints);
     $('pick-status').textContent='Välj A eller B och klicka. Rektangeln visar tillgängligt OSM-område.';
-  },reset(){if(map&&bounds)map.fitBounds(bounds,{padding:[28,28],maxZoom:16});if(svgView){svgView.x=svgView.y=0;svgView.scale=1;transform();}}};
+  },reset(){if(map&&bounds)map.fitBounds(bounds,{padding:[28,28],maxZoom:16});if(svgView&&last)drawFallback(last);}};
 })();

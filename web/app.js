@@ -168,7 +168,13 @@ function legList(segments,parent,phase){for(const leg of segments){
   if(leg.start_stop||leg.end_stop)text('small',`Hållplats-ID: ${leg.start_stop||'anropspunkt'} → ${leg.end_stop||'anropspunkt'}`,node);
   text('small',`Restid ${duration(leg.travel_seconds)} · väntan ${duration(leg.wait_seconds)}${leg.fixed_slack_seconds?' · slutmarginal '+duration(leg.fixed_slack_seconds):''}`,node);
   if(leg.mode!=='WALK')text('small',`Boarding-/bytesmarginal ${duration(leg.wait_seconds)} · krav >1:00`,node);
-  if(leg.geometry_connectors_m&&Object.values(leg.geometry_connectors_m).some(v=>v>1))text('small','Orange anslutning är approximativ; fysisk framkomlighet är inte verifierad.',node);
+  const connections=window.ReviewMap.connections(leg);
+  if(connections.length){
+    text('small',`Gångvägen är streckad i resans färg. Endast de korta anslutningarna är orange: ${connections.map(c=>c.label+' '+Math.round(c.meters)+' m').join(', ')}. Fysisk framkomlighet där är inte verifierad.`,node);
+    const button=text('button','Visa orange anslutningar',node);
+    button.type='button';button.setAttribute('aria-label',`Visa anslutningar: ${leg.start_stop_name} → ${leg.end_stop_name}`);
+    button.addEventListener('click',()=>window.ReviewMap.focusConnections(leg));
+  }
 }}
 function showBase(option,index){
   const obs=analysis.minute_observations[index];$('trip-title').textContent='Basresa · '+clock(obs.start);

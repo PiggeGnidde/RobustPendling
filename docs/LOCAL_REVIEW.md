@@ -92,13 +92,21 @@ shutdown-anropet för en reproducerbar avslutsdiagnos.
 
 ## Karta och omfattning
 
-SVG-kartan visar WGS84-geometri från de verifierade detaljsegmenten med
-panorering/zoom, hållplatser och bytesromber. Den är en geografisk
-granskningskarta utan gatukarta som bakgrund. Buss/tåg/spårvagn har olika
-färger, gång är gråstreckad och approximativa raka anslutningar orange.
+Leaflet-kartan visar WGS84-geometri från detaljsegmenten över OpenStreetMap,
+med panorering/zoom, hållplatser och bytespunkter. SVG-reservkartan visar
+samma lokala geometri utan bakgrund. Basresa, genomförd del och reserv har
+olika färger. Gång är streckad i resans färg och approximativa raka anslutningar
+är tjockt orange med en orange prick. Orange avser bara anslutningen mellan
+gatunät och anrops-/hållplatspunkt, inte hela gångvägen. Segmenttexten visar
+anslutningens längd; **Visa orange anslutningar** zoomar till dessa delar.
+Markeringarna ritas ovanpå övriga rutter/markörer. Knappen fungerar också i
+SVG-reservkartan, och **Återställ karta** återgår till hela resan.
+Fokus och användarens zoom behålls när man skrollar bort från kartan och tillbaka.
+Tunna orange/rosa streck i OpenStreetMaps bakgrund är kartleverantörens egna
+symboler och ska inte förväxlas med analysens orange anslutningar.
 Anslutningarna ändrar inte restiderna och verifierar inte fysisk
-framkomlighet. Etiketter för nära identiska hållplatser samordnas men
-alla segmentändpunkter finns kvar. Kartan visar bästa resan; antalet
+framkomlighet. Kartan markerar segmentändpunkter och visar vald basresa
+och eventuell vald N−1-reserv. Antalet
 upptäckta alternativ anges, men alternativa kartor väljs inte i denna fas.
 Linjeandelar avser **valda** resor, inte en uttömmande reservvägsinventering.
 
