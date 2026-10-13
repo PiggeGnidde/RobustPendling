@@ -9,6 +9,8 @@ from planner_core import routing_parameters,combined_nminus
 
 
 def validate_result(result,base):
+    mode=result.get('verification',{}).get('mode','full')
+    if mode not in ('full','structural'):raise ValueError('Unknown verification mode')
     frozen=base.get('metadata',{}).get('parameters',{})
     parameters=routing_parameters(frozen.get('max_rides',2),frozen.get('max_time_seconds',2700),frozen.get('walk_speed_kmh',3.6),frozen.get('max_walk_seconds',900))
     if 'canonical_sha256' in result:
@@ -60,7 +62,8 @@ def validate_result(result,base):
                 if any(s['trip_id']==failed['trip_id'] for s in rides):raise ValueError('Cancelled trip reused at another stop')
                 walk=sum(s['walking_seconds'] for s in prefix+segments)
                 if walk>parameters['max_walk_seconds'] or len(rides)+int(number)-1>parameters['max_rides']:raise ValueError('Resource budget reset')
-                if row['raw_r5_seconds']!=reserve['duration_seconds']:raise ValueError('R5/sweep mismatch')
+                if mode=='full' and row['raw_r5_seconds']!=reserve['duration_seconds']:raise ValueError('R5/sweep mismatch')
+                if mode=='structural' and row['raw_r5_seconds'] is not None:raise ValueError('Unperformed raw R5 check claimed')
                 checked+=1
             else:raise ValueError('Unknown status')
             expected=[]

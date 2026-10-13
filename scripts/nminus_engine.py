@@ -13,6 +13,20 @@ from planner_core import routing_parameters,combined_nminus
 from walking_links import ensure_walking_links
 
 
+def baseline_observation(obs):
+    """Reuse the frozen exact-minute optimum, excluding presentation fields."""
+    if obs['duration_seconds'] is None:
+        return dict(duration_seconds=None,status='UNREACHABLE',rides=[])
+    return {key:copy.deepcopy(obs[key]) for key in (
+        'duration_seconds','walking_seconds','waiting_seconds','fixed_slack_seconds',
+        'transfers','arrival_seconds','rides')}
+
+
+def continuation_key(failed,walked,completed_rides):
+    """Within one frozen feed/day/destination/parameter set, not per start minute."""
+    return (failed['start_stop'],failed['departure_seconds'],failed['trip_id'],walked,completed_rides)
+
+
 class NMinusEngine:
     def __init__(self,network,derived,stops,hashes):
         import jpype
@@ -163,10 +177,11 @@ class NMinusEngine:
 
     def iso(self,seconds):return (self.midnight+timedelta(seconds=seconds)).astimezone(self.display_zone).isoformat()
 
-    def analyze(self,report,baseline_only=False):
+    def analyze(self,report,baseline_only=False,validation=False):
         import r5py
         from r5py.r5.regional_task import RegionalTask
         from r5py.r5.trip_planner import TripPlanner
+        validation=validation or baseline_only
         self.calendar_check()
         meta=report['metadata'];params=meta['parameters'];parameters=routing_parameters(params['max_rides'],params['max_time_seconds'],params['walk_speed_kmh'],params['max_walk_seconds']);origin=params['origin'];destination=params['destination']
         self.parameters=parameters
@@ -194,10 +209,11 @@ class NMinusEngine:
         code={name:fingerprint(ROOT/'scripts'/name) for name in ('nminus_core.py','nminus_engine.py','schedule_sweep.py','r5_adapter.py','planner_core.py','walking_links.py')}
         scenarios={str(i):[] for i in range(1,parameters['max_rides']+1)};base_details=[];memo={};features=[];checks=[]
         for index,obs in enumerate(observations):
-            base=base_sweep.at(obs['start_seconds'])
-            if base!= {k:v for k,v in obs.items() if k in base}:raise RuntimeError('Baseline sweep changed')
-            baseline_raw=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
-            if baseline_raw!=obs['duration_seconds']:raise RuntimeError('Baseline raw R5 mismatch')
+            base=baseline_observation(obs)
+            if validation:
+                if base_sweep.at(obs['start_seconds'])!=base:raise RuntimeError('Baseline sweep changed')
+                baseline_raw=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
+                if baseline_raw!=obs['duration_seconds']:raise RuntimeError('Baseline raw R5 mismatch')
             if baseline_only:continue
             if base['duration_seconds'] is None:
                 base_details.append(None)
@@ -213,7 +229,7 @@ class NMinusEngine:
                 position=transit_positions[leg_number-1];failed=base['rides'][leg_number-1]
                 ready=failed['departure_seconds'];stop=failed['start_stop'];prefix=copy.deepcopy(base_segments[:position])
                 walked=sum(s['walking_seconds'] for s in prefix);resources=remaining_resources(walked,leg_number-1,parameters)
-                key=(stop,ready,failed['trip_id'],walked,leg_number-1)
+                key=continuation_key(failed,walked,leg_number-1)
                 if key not in memo:
                     eligible=[t for t in trips if t['id']!=failed['trip_id']]
                     continuation_access={k:v for k,v in self.transfers(stop).items() if v<=resources['max_walk_seconds']}
@@ -224,12 +240,14 @@ class NMinusEngine:
                         total=continuation_direct+60
                         if total<=HORIZON_SECONDS and (reserve['duration_seconds'] is None or total<reserve['duration_seconds']):
                             reserve=dict(duration_seconds=total,walking_seconds=continuation_direct,waiting_seconds=0,fixed_slack_seconds=60,transfers=0,arrival_seconds=ready+total,rides=[])
-                    raw=self.raw(request,ready,continuation_access,egress,resources,continuation_direct,leg_number-1,failed['trip_id'])
-                    if raw!=reserve['duration_seconds']:raise RuntimeError(f'N−1 raw R5 mismatch {index}/{number}: {raw} vs {reserve["duration_seconds"]}')
+                    raw=None
+                    if validation:
+                        raw=self.raw(request,ready,continuation_access,egress,resources,continuation_direct,leg_number-1,failed['trip_id'])
+                        if raw!=reserve['duration_seconds']:raise RuntimeError(f'N−1 raw R5 mismatch {index}/{number}: {raw} vs {reserve["duration_seconds"]}')
                     reserve_segments=self.segments(planner,reserve,ready,origin,destination,access_paths,egress_paths,stop) if reserve['duration_seconds'] is not None else []
                     memo[key]=(reserve,reserve_segments,raw)
                 reserve,reserve_segments,raw=memo[key]
-                self.calendar_check()
+                if validation:self.calendar_check()
                 if any(r['trip_id']==failed['trip_id'] for r in reserve['rides']):raise RuntimeError('Cancelled trip reused')
                 scoped=self.locations[failed['trip_id']][3]
                 row=dict(index=index,start=obs['start'],leg_number=leg_number,
@@ -248,10 +266,11 @@ class NMinusEngine:
                         props={k:v for k,v in leg.items() if k!='geometry'};props.update(index=index,leg_number=leg_number,phase=phase,segment=segment)
                         row_features.append(dict(type='Feature',geometry=leg['geometry'],properties=props))
                 row['geojson']=validate_geojson(dict(type='FeatureCollection',features=row_features));features.extend(row_features);rows.append(row)
-                checks.append(dict(index=index,leg_number=leg_number,raw_equals_sweep=raw==reserve['duration_seconds'],calendar_restored=True))
+                if validation:checks.append(dict(index=index,leg_number=leg_number,raw_equals_sweep=raw==reserve['duration_seconds'],calendar_restored=True))
             # Every scenario above restores the shared network before this baseline check.
-            after=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
-            if after!=baseline_raw:raise RuntimeError('Scenario altered subsequent baseline')
+            if validation:
+                after=self.raw(request,obs['start_seconds'],access,egress,parameters,direct,0)
+                if after!=baseline_raw:raise RuntimeError('Scenario altered subsequent baseline')
         if baseline_only:
             self.calendar_check()
             return dict(status='OK',base_metrics=report['metrics'],minutes_checked=len(observations),baseline_sweep_and_raw_r5_equal=True,network_build_count=1)
@@ -261,8 +280,10 @@ class NMinusEngine:
             input_hashes=self.hashes,code_hashes=code,versions=meta['versions'],date=meta['date'],timezone=meta['timezone'],parameters=parameters,
             minute_observations=observations,base_metrics=report['metrics'],base_itineraries=base_details,
             scenarios=scenarios,summaries={k:summarize(v) for k,v in scenarios.items()},
-            verification=dict(baseline_before_after_equal_count=len(observations),checks=checks,
-                unique_continuation_searches=len(memo),network_build_count=1,exact_trip_exclusion='temporary inactive TripSchedule.serviceCode before boarding; finally restored',
+            verification=dict(mode='full' if validation else 'structural',baseline_source='verified_minute_profile',
+                baseline_before_after_equal_count=len(observations) if validation else 0,checks=checks,
+                unique_continuation_searches=len(memo),network_build_count=1,
+                exact_trip_exclusion='GTFS trip_id removed from active service-day search; full validation also disables R5 TripSchedule.serviceCode temporarily',
                 raw_r5_sweep_equal_count=len(checks)),
             geojson=validate_geojson(dict(type='FeatureCollection',features=features)))
         self.calendar_check()

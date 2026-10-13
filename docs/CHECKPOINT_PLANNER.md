@@ -51,5 +51,20 @@ Trafikdygns-/DST-övergång och frekvensbaserade turinstanser är begränsningar
 Framtida arbete: större täcknings-/prestandaprov och eventuellt optimala
 tre-/fyrabensbasresor. Nu verifieras flerben i syntetiska tester och i verklig
 reserv; inget sådant basfall har påvisats inom dessa små 45-minutersprov.
+## N−1-prestanda, 2026-10-13
+
+Interaktiv worker använder nu strukturell validering och återanvänder
+basprofilen; full R5-dubbelkontroll finns kvar i `validate_nminus.py`.
+Identiska reservproblem återanvänds med bibehållen gång-/trafikbensbudget.
+De tre frysta 60-minutersfallen har körts två gånger i snabbt läge och
+matchar arkiverade resor, mått och GeoJSON exakt. Lomma: 8,3–9,1 s;
+Malmö: 11,5–12,7 s; Gunnesbo: 13,1–14,0 s. Initial nätverksladdning är
+inte inkluderad. Ett nytt treminutersprov i båda lägena matchar också.
+En Bjärred-startminut med fyrabensbudget och tre valda trafikben matchar
+full R5-audit för alla tre bortfall: 121,3 s full audit mot 9,2 s snabbt.
+89 enhetstester passerar. Lokala mätningar finns i
+`outputs/nminus-performance/`; ursprungliga resultat har inte skrivits över.
+Nya servern ska startas om vid routingkodändring enligt kommandot ovan.
+
 Historiska förseningar, realtidsinsamling och sannolikheter ligger fortsatt
 utanför detta steg. T90_schedule betyder inte verklig punktlighet.

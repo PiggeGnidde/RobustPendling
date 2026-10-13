@@ -62,3 +62,37 @@ Initial nätverksladdning, komplettering av byteslänkar och detaljgeometri
 kostar fortfarande tid. Resultat utan användbar resa kan kräva en sökning
 för varje minut. N−1 gör separata reservsökningar med befintlig cache; denna
 optimering av basprofilen innebär inte att alla reservsökningar försvinner.
+
+## N−1: interaktiv körning och full validering
+
+Granskningsvyn återanvänder basprofilens frysta minutobservationer. Den gör
+inte om bassweep eller råa R5-sökningar före/efter varje minut. En separat
+reservsökning behövs bara för varje unik kombination av beskedshållplats,
+avgångssekund, felande trip_id, förbrukad gång och förbrukade trafikben.
+Cache gäller inom samma analys: feed, trafikdag, destination och övriga
+parametrar är då fasta. Minutens genomförda del och total-/extratid beräknas
+fortfarande separat. Nätverket byggs en gång och geometrilänkar återanvänds.
+
+I normalt läge utesluts exakt trip_id ur den aktiva trafikdagens GTFS-sökning,
+inklusive senare hållplatser. R5-kalendern ändras inte. Kalenderkontroll görs
+vid början och slut. Varje scenario kontrolleras fortsatt av den oberoende
+tidslinje-/budget-/GeoJSON-validatorn. `verification.mode = structural`,
+`raw_r5_seconds = null` och noll råa dubbelkontroller betyder att jämförelsen
+med R5 inte har utförts i just denna körning; det påstås inte vara full audit.
+
+`validate_nminus.py` väljer uttryckligen full validering. Då återberäknas
+basen, råa R5-restider jämförs för bas och unika reserver, den exakta R5-turen
+inaktiveras tillfälligt och återställs, och basen kontrolleras efter scenarier.
+Routingregler, tie-break, sökhorisont och N−1-mått är lika i båda lägena.
+
+Jämför lägena på ett litet sparat fall utan ny basrouting:
+
+```powershell
+.\.venv\tools\Library\bin\micromamba.exe run -r .\.venv\mamba -n robustpendling python -B scripts/benchmark_nminus.py --report outputs/phase2c_lomma_lund_1.json --minutes 3 --full-validation --output outputs/nminus-performance/small
+```
+
+Skriptet kontrollerar att resor, mått och GeoJSON är identiska mellan lägena
+och att två snabba körningar är helt identiska. `--minutes 60 --expected
+outputs/nminus/lomma_lund_1.json` jämför hela timmen med sparad full audit.
+Tidsmätningen omfattar N−1-analys, kontraktkontroller och atomisk skrivning,
+men inte initial nätverksladdning. Loggar/resultat sparas Git-ignorerade.

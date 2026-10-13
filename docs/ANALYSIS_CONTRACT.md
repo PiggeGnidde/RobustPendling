@@ -237,3 +237,16 @@ Originalets SHA-256 förblir
 6a17c51b0924301eea8466e71d826bd7495199ce3a0de7f4f90d0293b4c13182.
 Detta regionala test är inte full Skånetäckning, ±15-minutersstudie eller
 arbetsplatsanalys. Inga miljöpaket eller nya data installerades/hämtades.
+
+## N−1-verifieringsläge
+
+Interaktiv N−1 återanvänder den verifierade basprofilen och deduplicerar
+reservproblem inom samma frysta analys. `verification.mode = structural`
+betyder att tider, genomförd del, exakt turuteslutning, budget, horisont och
+GeoJSON kontrollerats; `raw_r5_seconds = null` betyder ej utförd R5-jämförelse,
+inte ej nåbar resa. Nåbarheten styrs av scenariots `status` och reservrestid.
+`verification.mode = full` (även äldre resultat utan mode) kräver råa
+R5-restider för nåbara reserver. Full audit väljs via `validate_nminus.py`
+eller workerns explicita `validation: true`. Normalt läge muterar ingen
+R5-turkalender. Alla schedule- och N−1-mått har oförändrad betydelse.
+Se [SCHEDULE_PROFILE.md](SCHEDULE_PROFILE.md) för reproducerbar jämförelse.

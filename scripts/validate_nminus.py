@@ -52,7 +52,7 @@ def main():
                 results=[]
                 for repeat in range(args.repeat):
                     output=out/f'{case}_{repeat+1}.json'
-                    task=dict(command='nminus',report=str(source),analysis_id=identity,output=str(output))
+                    task=dict(command='nminus',validation=True,report=str(source),analysis_id=identity,output=str(output))
                     print(f'RUN {case} {repeat+1}',flush=True)
                     process.stdin.write(json.dumps(task)+'\n');process.stdin.flush()
                     for line in process.stdout:

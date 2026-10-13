@@ -72,12 +72,14 @@ def main():
             if task.get('command') in ('nminus','regression'):
                 from nminus_engine import NMinusEngine
                 if nminus is None:nminus=NMinusEngine(network,derived,stops,expected)
-                result=nminus.analyze(report,baseline_only=task['command']=='regression')
+                started=time.perf_counter()
+                result=nminus.analyze(report,baseline_only=task['command']=='regression',validation=task.get('validation',False))
                 from nminus_validation import validate_result
                 if task['command']=='nminus':validate_result(result,report)
                 if any(fingerprint(inputs[k])!=hashes[k] for k in hashes):raise ValueError('Inputs changed during N−1 routing')
                 result.update(analysis_id=task['analysis_id'])
                 atomic_json(Path(task['output']),result)
+                print('REVIEW_TIMING '+json.dumps(dict(command=task['command'],seconds=time.perf_counter()-started)),flush=True)
                 print('REVIEW_RESULT '+task['output'],flush=True)
                 continue
             index=task['index']; obs=report['minute_observations'][index]
