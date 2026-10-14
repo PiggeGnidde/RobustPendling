@@ -3,6 +3,11 @@ ALLOWED_ACTIONS={'SCHEDULED','COORDINATE_WITH_DRIVER'}
 _PERMISSIONS_CACHE={}
 
 
+def configure_raw_validation(request,parameters):
+    """Disable destination-time heuristics within the explicit search horizon."""
+    request.suboptimalMinutes=parameters['max_time_seconds']//60+1
+
+
 def stop_permissions_allow(pickup,dropoff):
     return pickup in ALLOWED_ACTIONS and dropoff in ALLOWED_ACTIONS
 
@@ -15,13 +20,13 @@ def permission_filtered_add(state,delegate,permissions):
     return delegate.add(state)
 
 
-def dominating_factory(layer,suboptimal_minutes,parameters=None,ready=None):
+def dominating_factory(layer,suboptimal_minutes,parameters=None,ready=None,resource_aware=False):
     import jpype
     if layer not in _PERMISSIONS_CACHE:
         _PERMISSIONS_CACHE[layer]={i:([str(v) for v in p.pickups],[str(v) for v in p.dropoffs])
                                   for i,p in enumerate(layer.tripPatterns)}
     permissions=_PERMISSIONS_CACHE[layer]
-    if parameters and parameters['max_rides']>2:
+    if parameters and (resource_aware or parameters['max_rides']>2):
         from nminus_core import pareto_add
         def resource_factory(_):
             states=[]

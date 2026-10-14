@@ -113,7 +113,7 @@ def worker(args, grid, reused_network=None):
     if reused_network is None:instrument_shutdown()
     from r5py.r5.regional_task import RegionalTask
     from r5py.r5.trip_planner import TripPlanner
-    from r5_adapter import dominating_factory
+    from r5_adapter import dominating_factory,configure_raw_validation
     if r5py.__version__ != '1.1.7': raise RuntimeError('Adapter requires r5py 1.1.7')
     jar = ROOT/'cache/runtime/r5py/r5-v7.5.1-r5py-all.jar'
     if fingerprint(jar)['sha256'] != 'd50be106cadd7b636cfc0e209052767d7df570629f79fdf98ecd5cf5d2d89be7':
@@ -201,7 +201,7 @@ def worker(args, grid, reused_network=None):
     seed = next(s for s in range(1000) if (lambda r:r.nextInt(2)==1 and r.nextInt(2)==1)(rng_class(s)))
     def router(req):
         return router_class(network,req,access_java,egress_java,
-                            dominating_factory(layer,int(req.suboptimalMinutes),parameters=parameters,ready=int(req.fromTime)+1),None,True)
+                            dominating_factory(layer,int(req.suboptimalMinutes),parameters=parameters,ready=int(req.fromTime)+1,resource_aware=True),None,True)
     def state_result(state, ready):
         chain = []
         current = state
@@ -229,6 +229,8 @@ def worker(args, grid, reused_network=None):
         row=observations[index];seconds=start_seconds[index]
         req = copy.copy(request)._regional_task
         req.fromTime,req.toTime,req.monteCarloDraws = seconds-1,seconds+1,1
+        # A fast but walk-budget-infeasible path must not prune a valid path.
+        configure_raw_validation(req,parameters)
         engine = router(req)
         rng_field.set(engine,rng_class(seed))
         selected = [int(t) for t in generator.invoke(engine,req)]
@@ -288,6 +290,8 @@ def worker(args, grid, reused_network=None):
                                          explicit_minus_egress_floor_minutes=expected,equal=result_minutes==expected))
     frozen = dict(parameters,origin=origin,destination=destination,
                   r5_suboptimal_minutes=int(task.suboptimalMinutes),
+                  r5_raw_suboptimal_minutes=parameters['max_time_seconds']//60+1,
+                  r5_raw_dominance='arrival_walking_rides_pareto_before_destination_pruning',
                   window_start=args.start,window_end_inclusive=(requested_grid[-1]+timedelta(seconds=59)).isoformat(),
                   window_minutes=len(grid),network_area=area,schema_version=SCHEMA_VERSION,
                   feed_timezone=feed_timezone,feed_service_date=grid[0].date().isoformat(),

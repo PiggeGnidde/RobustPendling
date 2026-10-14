@@ -8,12 +8,34 @@ import unittest
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from analysis_contract import positive_jumps,audited_representatives,itinerary_timing,connect_walk_geometry
-from r5_adapter import permission_filtered_add,stop_permissions_allow
+from r5_adapter import permission_filtered_add,stop_permissions_allow,dominating_factory,configure_raw_validation
 from jvm_diagnostics import cleanup_after_exit
 from validate_phase2c import validate_worker,compare_results,REPRODUCIBLE_FIELDS
 
 
 class ValidationTests(unittest.TestCase):
+    def test_two_ride_raw_validation_preserves_later_lower_walk_label(self):
+        class Layer:
+            tripPatterns=[SimpleNamespace(pickups=['SCHEDULED','SCHEDULED'],dropoffs=['SCHEDULED','SCHEDULED'])]
+        fake=SimpleNamespace(JProxy=lambda interface,dict:dict)
+        with patch.dict(sys.modules,{'jpype':fake}):
+            factory=dominating_factory(Layer(),121,parameters={'max_rides':2,'max_walk_seconds':900},ready=0,resource_aware=True)
+            proxy=factory(None)
+            fast=SimpleNamespace(pattern=0,time=950,back=SimpleNamespace(pattern=-1,time=800,back=None),boardStopPosition=0,alightStopPosition=1)
+            later=SimpleNamespace(pattern=0,time=1000,back=SimpleNamespace(pattern=-1,time=100,back=None),boardStopPosition=0,alightStopPosition=1)
+            self.assertTrue(proxy['add'](fast));self.assertTrue(proxy['add'](later))
+            # 300 seconds of egress would invalidate the early high-walk label.
+            egress=factory(None)
+            self.assertFalse(egress['add'](SimpleNamespace(pattern=-1,time=1250,back=fast)))
+            self.assertTrue(egress['add'](SimpleNamespace(pattern=-1,time=1300,back=later)))
+
+    def test_raw_pruning_horizon_tracks_configured_duration(self):
+        request=SimpleNamespace(suboptimalMinutes=5)
+        configure_raw_validation(request,{'max_time_seconds':7200})
+        self.assertEqual(request.suboptimalMinutes,121)
+        configure_raw_validation(request,{'max_time_seconds':2700})
+        self.assertEqual(request.suboptimalMinutes,46)
+
     def test_top_jumps_stable_ties_and_unreachable(self):
         rows=[dict(start=str(i),duration_seconds=v) for i,v in enumerate([100,200,150,250,None,200])]
         jumps=positive_jumps(rows)

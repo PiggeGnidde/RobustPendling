@@ -53,6 +53,12 @@ tre-/fyrabensbasresor. Nu verifieras flerben i syntetiska tester och i verklig
 reserv; inget sådant basfall har påvisats inom dessa små 45-minutersprov.
 ## N−1-prestanda, 2026-10-13
 
+2026-10-14: rå R5-baskontroll rättad för falskt ROUTING_MISMATCH vid
+tvåbensresor. Pareto-gallring bevarar gångbudget och kontrollhorisonten är
+explicit. 60/60 minuter matchar i Bjärred–Malmö-fallet; basmåtten är
+oförändrade. 91 tester passerar. Se `ROUTING_VALIDATION_FIX.md` för
+lokala artefakter och reproduktion. Servern återstartas med rättad kod.
+
 Interaktiv worker använder nu strukturell validering och återanvänder
 basprofilen; full R5-dubbelkontroll finns kvar i `validate_nminus.py`.
 Identiska reservproblem återanvänds med bibehållen gång-/trafikbensbudget.
